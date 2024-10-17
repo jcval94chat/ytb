@@ -199,7 +199,9 @@ if __name__ == '__main__':
 
     channel_urls = [
         'https://www.youtube.com/channel/CHANNEL_ID',
-        # Añade más URLs si lo deseas
+        "https://www.youtube.com/@MarianoTrejo",
+        "https://www.youtube.com/@humphrey",
+        "https://www.youtube.com/@MisPropiasFinanzas",
     ]
 
     all_videos_df = pd.DataFrame()
