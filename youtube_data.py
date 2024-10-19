@@ -41,7 +41,7 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
                 type='video'
             ).execute()
         except Exception as e:
-            logging.error(f"Error al obtener videos del canal {channel_name}: {e}")
+            logging.error(f"Error al obtener videos del canal {channel_name}: {str(e)}")
             break
 
         video_ids = [item['id']['videoId'] for item in res.get('items', [])]
@@ -55,7 +55,7 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
                 id=','.join(video_ids)
             ).execute()
         except Exception as e:
-            logging.error(f"Error al obtener detalles de videos: {e}")
+            logging.error(f"Error al obtener detalles de videos: {str(e)}")
             break
 
         for item in stats_res.get('items', []):
@@ -97,7 +97,7 @@ def iso_duration_to_seconds(duration):
         parsed_duration = isodate.parse_duration(duration)
         return int(parsed_duration.total_seconds())
     except Exception as e:
-        logging.error(f"Error al convertir la duración {duration}: {e}")
+        logging.error(f"Error al convertir la duración {duration}: {str(e)}")
         return 0
 
 def get_channel_id_and_name_from_url(youtube, channel_url):
@@ -147,7 +147,7 @@ def get_channel_id_and_name_from_url(youtube, channel_url):
             if res.get('items'):
                 channel_name = res['items'][0]['snippet']['title']
     except Exception as e:
-        logging.error(f"Error al obtener el ID y nombre del canal desde {channel_url}: {e}")
+        logging.error(f"Error al obtener el ID y nombre del canal desde {channel_url}: {str(e)}")
 
     return channel_id, channel_name
 
@@ -173,7 +173,7 @@ if __name__ == '__main__':
         )
         gc = gspread.authorize(credentials)
     except Exception as e:
-        logging.error(f"Error al cargar las credenciales de Google Sheets: {e}")
+        logging.error(f"Error al cargar las credenciales de Google Sheets: {str(e)}")
         exit(1)
 
     # ID de la hoja de cálculo de Google Sheets
@@ -185,7 +185,7 @@ if __name__ == '__main__':
     try:
         sheet = gc.open_by_key(spreadsheet_id).sheet1  # Usamos la primera hoja
     except Exception as e:
-        logging.error(f"Error al abrir la hoja de cálculo: {e}")
+        logging.error(f"Error al abrir la hoja de cálculo: {str(e)}")
         exit(1)
 
     youtube = build('youtube', 'v3', developerKey=api_key)
@@ -194,7 +194,7 @@ if __name__ == '__main__':
     try:
         existing_data = pd.DataFrame(sheet.get_all_records())
     except Exception as e:
-        logging.warning(f"No se pudo leer datos existentes o la hoja está vacía: {e}")
+        logging.warning(f"No se pudo leer datos existentes o la hoja está vacía: {str(e)}")
         existing_data = pd.DataFrame()
 
     channel_urls = [
@@ -233,5 +233,5 @@ if __name__ == '__main__':
         sheet.update([combined_df.columns.values.tolist()] + combined_df.values.tolist())
         logging.info("Datos actualizados en la hoja de cálculo.")
     except Exception as e:
-        logging.error(f"Error al actualizar la hoja de cálculo: {e}")
+        logging.error(f"Error al actualizar la hoja de cálculo: {str(e)}")
 
