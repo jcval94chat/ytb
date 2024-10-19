@@ -14,12 +14,21 @@ import base64
 import traceback
 
 # Configuración de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    filename='youtube_data.log',  # Guarda los logs en un archivo
-    filemode='a'  # Añade al archivo existente
-)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# Crear formato de logging
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+# Crear manejador para archivo
+file_handler = logging.FileHandler('youtube_data.log', mode='a')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+# Crear manejador para consola
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 def get_channel_videos(api_key, channel_id, channel_name, days=90):
     try:
