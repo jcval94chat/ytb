@@ -12,6 +12,7 @@ import time
 import isodate
 import base64
 import traceback
+import requests
 
 # Configuración de logging
 logging.basicConfig(
@@ -225,6 +226,61 @@ def get_channel_id_and_name_from_url(youtube, channel_url):
 
     return channel_id, channel_name
 
+def upload_file_to_github(repo_owner, repo_name, file_path, content, commit_message, github_token):
+    """Sube o actualiza un archivo en un repositorio de GitHub usando la API de GitHub."""
+    url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{file_path}'
+    headers = {
+        'Authorization': f'token {github_token}',
+        'Content-Type': 'application/json'
+    }
+
+    # Verificar si el archivo ya existe para obtener el SHA
+    try:
+        get_response = requests.get(url, headers=headers)
+        if get_response.status_code == 200:
+            sha = get_response.json()['sha']
+            logging.info(f"El archivo {file_path} existe en el repositorio, se actualizará.")
+        elif get_response.status_code == 404:
+            sha = None
+            logging.info(f"El archivo {file_path} no existe en el repositorio, se creará.")
+        else:
+            logging.error(f"Error al verificar la existencia del archivo en GitHub: {get_response.text}")
+            return False
+    except Exception as e:
+        logging.error(f"Error al obtener el archivo desde GitHub: {str(e)}")
+        logging.error(traceback.format_exc())
+        return False
+
+    # Codificar el contenido en base64
+    try:
+        encoded_content = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+    except Exception as e:
+        logging.error(f"Error al codificar el contenido en base64: {str(e)}")
+        logging.error(traceback.format_exc())
+        return False
+
+    data = {
+        'message': commit_message,
+        'content': encoded_content,
+        'branch': 'main'  # Cambia esto si utilizas otra rama
+    }
+    if sha:
+        data['sha'] = sha
+
+    # Hacer la solicitud PUT para crear o actualizar el archivo
+    try:
+        response = requests.put(url, headers=headers, data=json.dumps(data))
+        if response.status_code in [200, 201]:
+            logging.info(f"Archivo {file_path} subido correctamente al repositorio.")
+            return True
+        else:
+            logging.error(f"Error al subir el archivo a GitHub: {response.text}")
+            return False
+    except Exception as e:
+        logging.error(f"Error al subir el archivo a GitHub: {str(e)}")
+        logging.error(traceback.format_exc())
+        return False
+
 if __name__ == '__main__':
     api_key = os.environ.get('YOUTUBE_API_KEY')
     if not api_key:
@@ -275,7 +331,7 @@ if __name__ == '__main__':
         existing_data = pd.DataFrame()
 
     channel_urls = [
-        'https://www.youtube.com/channel/CHANNEL_ID',
+        # 'https://www.youtube.com/channel/CHANNEL_ID',
         "https://www.youtube.com/@MarianoTrejo",
         "https://www.youtube.com/@humphrey",
         "https://www.youtube.com/@MisPropiasFinanzas",
@@ -324,3 +380,39 @@ if __name__ == '__main__':
     except Exception as e:
         logging.error(f"Error al actualizar la hoja de cálculo: {str(e)}")
         logging.error(traceback.format_exc())
+
+    # Guardar el DataFrame como CSV
+    try:
+        csv_content = combined_df.to_csv(index=False)
+        logging.info("DataFrame convertido a CSV.")
+    except Exception as e:
+        logging.error(f"Error al convertir el DataFrame a CSV: {str(e)}")
+        logging.error(traceback.format_exc())
+        exit(1)
+
+    # Subir el archivo CSV al repositorio de GitHub
+    github_token = os.environ.get('GITHUB_TOKEN')
+    if not github_token:
+        logging.error("El token de GitHub no está configurado en la variable de entorno 'GITHUB_TOKEN'")
+        exit(1)
+
+    repo_owner = 'jcval94chat'  # Reemplaza con tu nombre de usuario de GitHub
+    repo_name = 'ytb'  # Nombre del repositorio
+    execution_date = datetime.now().strftime("%Y%m%d")  # Fecha de ejecución en formato YYYYMMDD
+    file_name = f"data_{execution_date}.csv"  # Nombre del archivo con la fecha de ejecución
+    file_path = f'archivos/{file_name}'  # Ruta del archivo en el repositorio
+    commit_message = f'Actualización automática del archivo {file_name}'
+
+    upload_success = upload_file_to_github(
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        file_path=file_path,
+        content=csv_content,
+        commit_message=commit_message,
+        github_token=github_token
+    )
+
+    if upload_success:
+        logging.info(f"Archivo CSV '{file_name}' subido correctamente al repositorio de GitHub en la carpeta 'archivos'.")
+    else:
+        logging.error("Hubo un problema al subir el archivo CSV al repositorio de GitHub.")
