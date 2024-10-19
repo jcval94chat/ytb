@@ -3,7 +3,7 @@
 import os
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 import gspread
@@ -12,7 +12,7 @@ import time
 import isodate
 import base64
 import traceback
-import requests
+import requests  # Importamos requests para interactuar con la API de GitHub
 
 # Configuración de logging
 logging.basicConfig(
@@ -31,7 +31,7 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
 
     # Calcular la fecha de corte (formato RFC 3339 sin microsegundos)
     try:
-        cutoff_datetime = datetime.utcnow() - timedelta(days=days)
+        cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=days)
         cutoff_date = cutoff_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
         logging.info(f"Fecha de corte calculada: {cutoff_date}")
     except Exception as e:
@@ -101,7 +101,7 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
                 upload_date_str = snippet.get('publishedAt')
                 if upload_date_str:
                     upload_date = isodate.parse_datetime(upload_date_str)
-                    upload_date = upload_date.strftime('%Y-%m-%dT%H:%M:%S')
+                    upload_date = upload_date.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
                 else:
                     upload_date = None
                     logging.warning(f"No se encontró 'publishedAt' para el video ID: {item.get('id')}")
@@ -118,7 +118,7 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
                     'views': int(statistics.get('viewCount', 0)),
                     'likes': int(statistics.get('likeCount', 0)),
                     'comments': int(statistics.get('commentCount', 0)),
-                    'execution_date': datetime.utcnow().strftime('%Y-%m-%d')
+                    'execution_date': datetime.now(timezone.utc).strftime('%Y-%m-%d')
                 })
                 logging.info(f"Procesado video ID: {item.get('id')}")
             except Exception as e:
@@ -331,7 +331,7 @@ if __name__ == '__main__':
         existing_data = pd.DataFrame()
 
     channel_urls = [
-        # 'https://www.youtube.com/channel/CHANNEL_ID',
+        'https://www.youtube.com/channel/CHANNEL_ID',
         "https://www.youtube.com/@MarianoTrejo",
         "https://www.youtube.com/@humphrey",
         "https://www.youtube.com/@MisPropiasFinanzas",
@@ -364,8 +364,12 @@ if __name__ == '__main__':
 
     # Filtrar datos de los últimos 90 días
     try:
-        combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], format='%Y-%m-%dT%H:%M:%S')
-        cutoff_date = datetime.utcnow() - timedelta(days=90)
+        combined_df['upload_date'] = pd.to_datetime(
+            combined_df['upload_date'],
+            format='%Y-%m-%dT%H:%M:%SZ',
+            utc=True
+        )
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=90)
         combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
         logging.info(f"Filtrado de datos completado. {len(combined_df)} registros después del filtro de fecha.")
     except Exception as e:
