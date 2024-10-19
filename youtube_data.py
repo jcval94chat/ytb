@@ -11,6 +11,7 @@ import logging
 import time
 import isodate
 import base64
+import traceback
 
 # Configuración de logging
 logging.basicConfig(
@@ -42,6 +43,7 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
             ).execute()
         except Exception as e:
             logging.error(f"Error al obtener videos del canal {channel_name}: {str(e)}")
+            logging.error(traceback.format_exc()) 
             break
 
         video_ids = [item['id']['videoId'] for item in res.get('items', [])]
@@ -98,6 +100,7 @@ def iso_duration_to_seconds(duration):
         return int(parsed_duration.total_seconds())
     except Exception as e:
         logging.error(f"Error al convertir la duración {duration}: {str(e)}")
+        logging.error(traceback.format_exc()) 
         return 0
 
 def get_channel_id_and_name_from_url(youtube, channel_url):
@@ -137,6 +140,7 @@ def get_channel_id_and_name_from_url(youtube, channel_url):
                     channel_name = res['items'][0]['snippet']['channelTitle']
         else:
             logging.error(f"URL del canal no reconocida: {channel_url}")
+            logging.error(traceback.format_exc()) 
             return None, None
 
         if channel_id and not channel_name:
@@ -148,6 +152,7 @@ def get_channel_id_and_name_from_url(youtube, channel_url):
                 channel_name = res['items'][0]['snippet']['title']
     except Exception as e:
         logging.error(f"Error al obtener el ID y nombre del canal desde {channel_url}: {str(e)}")
+        logging.error(traceback.format_exc()) 
 
     return channel_id, channel_name
 
@@ -155,12 +160,14 @@ if __name__ == '__main__':
     api_key = os.environ.get('YOUTUBE_API_KEY')
     if not api_key:
         logging.error("La clave de API no está configurada en la variable de entorno 'YOUTUBE_API_KEY'")
+        logging.error(traceback.format_exc()) 
         exit(1)
 
     # Cargar las credenciales de Google Sheets desde la variable de entorno
     google_creds_json = os.environ.get('GOOGLE_SHEETS_CREDS_BASE64')
     if not google_creds_json:
         logging.error("Las credenciales de Google Sheets no están configuradas en 'GOOGLE_SHEETS_CREDS_BASE64'")
+        logging.error(traceback.format_exc()) 
         exit(1)
 
     # Decodificar las credenciales de base64
@@ -174,18 +181,21 @@ if __name__ == '__main__':
         gc = gspread.authorize(credentials)
     except Exception as e:
         logging.error(f"Error al cargar las credenciales de Google Sheets: {str(e)}")
+        logging.error(traceback.format_exc()) 
         exit(1)
 
     # ID de la hoja de cálculo de Google Sheets
     spreadsheet_id = os.environ.get('SPREADSHEET_ID')
     if not spreadsheet_id:
         logging.error("El ID de la hoja de cálculo no está configurado en 'SPREADSHEET_ID'")
+        logging.error(traceback.format_exc()) 
         exit(1)
 
     try:
         sheet = gc.open_by_key(spreadsheet_id).sheet1  # Usamos la primera hoja
     except Exception as e:
         logging.error(f"Error al abrir la hoja de cálculo: {str(e)}")
+        logging.error(traceback.format_exc()) 
         exit(1)
 
     youtube = build('youtube', 'v3', developerKey=api_key)
@@ -214,6 +224,7 @@ if __name__ == '__main__':
             logging.info(f"Datos agregados para el canal: {channel_name}")
         else:
             logging.error(f"No se pudo obtener el ID del canal para {url}")
+            logging.error(traceback.format_exc()) 
 
     # Combinar los datos nuevos con los existentes y eliminar duplicados
     if not existing_data.empty:
@@ -234,4 +245,5 @@ if __name__ == '__main__':
         logging.info("Datos actualizados en la hoja de cálculo.")
     except Exception as e:
         logging.error(f"Error al actualizar la hoja de cálculo: {str(e)}")
+        logging.error(traceback.format_exc()) 
 
