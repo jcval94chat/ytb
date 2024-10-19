@@ -3,7 +3,7 @@
 import os
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 import gspread
@@ -25,7 +25,8 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
     youtube = build('youtube', 'v3', developerKey=api_key)
     
     # Calcular la fecha de corte (formato ISO 8601)
-    cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat("T") + "Z"
+    
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat("T") + "Z"
 
     videos = []
     next_page_token = None
@@ -234,8 +235,10 @@ if __name__ == '__main__':
         combined_df = all_videos_df
 
     # Filtrar datos de los últimos 90 días
-    combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'])
-    cutoff_date = datetime.utcnow() - timedelta(days=90)
+    # combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'])
+    combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date']).dt.tz_convert(None)
+    
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=90)
     combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
 
     # Actualizar la hoja de cálculo con los datos combinados
