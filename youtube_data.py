@@ -22,11 +22,19 @@ logging.basicConfig(
 )
 
 def get_channel_videos(api_key, channel_id, channel_name, days=90):
-    youtube = build('youtube', 'v3', developerKey=api_key)
-    
-    # Calcular la fecha de corte (formato ISO 8601)
-    
-    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat("T") + "Z"
+    try:
+        youtube = build('youtube', 'v3', developerKey=api_key)
+    except Exception as e:
+        logging.error(f"Error al inicializar el cliente de YouTube API: {str(e)}")
+        return pd.DataFrame()
+
+    # Calcular la fecha de corte (formato RFC 3339 sin microsegundos)
+    try:
+        cutoff_datetime = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_date = cutoff_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
+    except Exception as e:
+        logging.error(f"Error al calcular la fecha de corte: {str(e)}")
+        return pd.DataFrame()
 
     videos = []
     next_page_token = None
@@ -42,13 +50,18 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
                 order='date',
                 type='video'
             ).execute()
+            logging.info(f"Obtenidos videos de la página con token: {next_page_token}")
         except Exception as e:
             logging.error(f"Error al obtener videos del canal {channel_name}: {str(e)}")
-            logging.error(traceback.format_exc()) 
             break
 
-        video_ids = [item['id']['videoId'] for item in res.get('items', [])]
-        if not video_ids:
+        try:
+            video_ids = [item['id']['videoId'] for item in res.get('items', [])]
+            if not video_ids:
+                logging.info(f"No se encontraron más videos para el canal {channel_name}")
+                break
+        except KeyError as e:
+            logging.error(f"Error al extraer IDs de videos: {str(e)}")
             break
 
         try:
@@ -57,42 +70,55 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
                 part='snippet,contentDetails,statistics',
                 id=','.join(video_ids)
             ).execute()
+            logging.info(f"Obtenidos detalles de {len(video_ids)} videos")
         except Exception as e:
             logging.error(f"Error al obtener detalles de videos: {str(e)}")
             break
 
         for item in stats_res.get('items', []):
-            snippet = item.get('snippet', {})
-            statistics = item.get('statistics', {})
-            content_details = item.get('contentDetails', {})
+            try:
+                snippet = item.get('snippet', {})
+                statistics = item.get('statistics', {})
+                content_details = item.get('contentDetails', {})
 
-            # Convertir la duración de ISO 8601 a segundos
-            duration_iso = content_details.get('duration', 'PT0S')
-            duration_seconds = iso_duration_to_seconds(duration_iso)
+                # Convertir la duración de ISO 8601 a segundos
+                duration_iso = content_details.get('duration', 'PT0S')
+                duration_seconds = iso_duration_to_seconds(duration_iso)
 
-            videos.append({
-                'channel_name': channel_name,
-                'video_id': item.get('id'),
-                'title': snippet.get('title'),
-                'description': snippet.get('description'),
-                'upload_date': snippet.get('publishedAt'),
-                'tags': ','.join(snippet.get('tags', [])),
-                'thumbnail_url': snippet.get('thumbnails', {}).get('high', {}).get('url'),
-                'duration_seconds': duration_seconds,
-                'views': int(statistics.get('viewCount', 0)),
-                'likes': int(statistics.get('likeCount', 0)),
-                'comments': int(statistics.get('commentCount', 0)),
-                'execution_date': datetime.utcnow().strftime('%Y-%m-%d')
-            })
+                videos.append({
+                    'channel_name': channel_name,
+                    'video_id': item.get('id'),
+                    'title': snippet.get('title'),
+                    'description': snippet.get('description'),
+                    'upload_date': snippet.get('publishedAt'),
+                    'tags': ','.join(snippet.get('tags', [])),
+                    'thumbnail_url': snippet.get('thumbnails', {}).get('high', {}).get('url'),
+                    'duration_seconds': duration_seconds,
+                    'views': int(statistics.get('viewCount', 0)),
+                    'likes': int(statistics.get('likeCount', 0)),
+                    'comments': int(statistics.get('commentCount', 0)),
+                    'execution_date': datetime.utcnow().strftime('%Y-%m-%d')
+                })
+                logging.info(f"Procesado video ID: {item.get('id')}")
+            except Exception as e:
+                logging.error(f"Error al procesar el video {item.get('id')}: {str(e)}")
+                continue  # Continuar con el siguiente video
 
         next_page_token = res.get('nextPageToken')
         if not next_page_token:
+            logging.info(f"Se han procesado todos los videos para el canal {channel_name}")
             break
 
         # Respetar el límite de solicitudes por segundo
         time.sleep(0.1)
 
-    df = pd.DataFrame(videos)
+    try:
+        df = pd.DataFrame(videos)
+        logging.info(f"DataFrame creado con {len(df)} registros")
+    except Exception as e:
+        logging.error(f"Error al crear el DataFrame: {str(e)}")
+        df = pd.DataFrame()
+
     return df
 
 def iso_duration_to_seconds(duration):
