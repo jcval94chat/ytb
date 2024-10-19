@@ -16,7 +16,7 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v4  # Actualizado a la versión más reciente
         with:
-          python-version: '3.x'
+          python-version: '3.12.7'
 
       - name: Instalar dependencias
         run: |
