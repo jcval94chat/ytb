@@ -3,7 +3,7 @@
 import os
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC  # Añadido UTC
 from googleapiclient.discovery import build
 from google.oauth2.service_account import Credentials
 import gspread
@@ -39,7 +39,8 @@ def get_channel_videos(api_key, channel_id, channel_name, days=90):
 
     # Calcular la fecha de corte (formato RFC 3339 sin microsegundos)
     try:
-        cutoff_datetime = datetime.utcnow() - timedelta(days=days)
+        cutoff_datetime = datetime.now(UTC) - timedelta(days=days)  # Usando datetime.now(UTC)
+        
         cutoff_date = cutoff_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
         logging.info(f"Fecha de corte calculada: {cutoff_date}")
     except Exception as e:
@@ -325,6 +326,13 @@ if __name__ == '__main__':
         logging.error(f"Error al procesar las fechas de 'upload_date': {str(e)}")
         logging.error(traceback.format_exc())
 
+
+    # Antes de actualizar la hoja, convierte las columnas datetime a strings
+    datetime_columns = combined_df.select_dtypes(include=['datetime64[ns]']).columns
+    for col in datetime_columns:
+        combined_df[col] = combined_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    
     # Actualizar la hoja de cálculo con los datos combinados
     try:
         sheet.clear()
