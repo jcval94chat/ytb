@@ -318,9 +318,16 @@ if __name__ == '__main__':
 
     # Filtrar datos de los últimos 90 días
     try:
-        combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], format='%Y-%m-%dT%H:%M:%S')
+        # combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], format='%Y-%m-%dT%H:%M:%S')
+        # cutoff_date = datetime.utcnow() - timedelta(days=90)
+        # combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
+
+        # Convertir las fechas
+        combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], errors='coerce')  # No especificar el formato
+        combined_df = combined_df.dropna(subset=['upload_date'])
         cutoff_date = datetime.utcnow() - timedelta(days=90)
         combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
+        
         logging.info(f"Filtrado de datos completado. {len(combined_df)} registros después del filtro de fecha.")
     except Exception as e:
         logging.error(f"Error al procesar las fechas de 'upload_date': {str(e)}")
