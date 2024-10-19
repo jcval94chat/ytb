@@ -2,3 +2,5 @@ google-api-python-client
 pandas
 isodate
 python-dateutil
+gspread
+google-auth
