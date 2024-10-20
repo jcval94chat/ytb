@@ -30,6 +30,37 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+
+
+def get_channels():
+
+    channel_urls = [
+        "https://www.youtube.com/@MarianoTrejo",
+        "https://www.youtube.com/@humphrey",
+        "https://www.youtube.com/@MisPropiasFinanzas",
+        # "https://www.youtube.com/c/Adri%C3%A0Sol%C3%A0Pastor",
+        "https://www.youtube.com/@AdriàSolàPastor",
+        "https://www.youtube.com/@EduardoRosas",
+        # "https://www.youtube.com/c/C%C3%A9sarDabiánFinanzas",
+        "https://www.youtube.com/@CésarDabiánFinanzas",
+        "https://www.youtube.com/@soycristinadayz",
+        "https://www.youtube.com/@MorisDieck",
+        "https://www.youtube.com/@AdrianSaenz",
+        "https://www.youtube.com/@FinanzasparatodosYT",
+        "https://www.youtube.com/@LuisMiNegocios",
+        "https://www.youtube.com/@AprendizFinanciero",
+        "https://www.youtube.com/@negociosyfinanzas2559",
+        "https://www.youtube.com/@pequenocerdocapitalista",
+        "https://www.youtube.com/@AlexHormozi",
+        "https://www.youtube.com/@CalebHammer",
+        "https://www.youtube.com/c/Myprimermillón",
+        "https://www.youtube.com/@starterstory",
+        "https://www.youtube.com/@irenealbacete",
+        "https://www.youtube.com/@bulkin_uri"
+    ]
+    return channel_urls
+
+
 def get_channel_videos(api_key, channel_id, channel_name, days=90):
     try:
         youtube = build('youtube', 'v3', developerKey=api_key)
@@ -284,12 +315,7 @@ if __name__ == '__main__':
         logging.warning(f"No se pudo leer datos existentes o la hoja está vacía: {str(e)}")
         existing_data = pd.DataFrame()
 
-    channel_urls = [
-        # 'https://www.youtube.com/channel/CHANNEL_ID',
-        "https://www.youtube.com/@MarianoTrejo",
-        "https://www.youtube.com/@humphrey",
-        "https://www.youtube.com/@MisPropiasFinanzas",
-    ]
+    channel_urls = get_channels()
 
     all_videos_df = pd.DataFrame()
 
