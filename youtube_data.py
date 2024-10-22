@@ -338,12 +338,13 @@ if __name__ == '__main__':
     # Combinar los datos nuevos con los existentes y eliminar duplicados
     if not existing_data.empty:
         combined_df = pd.concat([existing_data, all_videos_df], ignore_index=True)
-        combined_df.drop_duplicates(subset='video_id', inplace=True)
+        combined_df.drop_duplicates(subset=['video_id','channel_name'], inplace=True)
     else:
         combined_df = all_videos_df
 
     # Filtrar datos de los últimos 90 días
     try:
+        logging.info(f"Canales procesados. {len(combined_df['channel_name'].unique())} canales totales con {len(combined_df)} registros")
         # combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], format='%Y-%m-%dT%H:%M:%S')
         # cutoff_date = datetime.utcnow() - timedelta(days=90)
         # combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
