@@ -350,7 +350,7 @@ if __name__ == '__main__':
         # combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
 
         # Convertir las fechas
-        combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], errors='coerce')  # No especificar el formato
+        # combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], errors='coerce')  # No especificar el formato
         # combined_df = combined_df.dropna(subset=['upload_date'])
         # cutoff_date = datetime.utcnow() - timedelta(days=90)
         # combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
