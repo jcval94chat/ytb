@@ -56,7 +56,8 @@ def get_channels():
         "https://www.youtube.com/c/Myprimermillón",
         "https://www.youtube.com/@starterstory",
         "https://www.youtube.com/@irenealbacete",
-        "https://www.youtube.com/@bulkin_uri"
+        "https://www.youtube.com/@bulkin_uri",
+        "https://www.youtube.com/@ExitoFinancieroOficial",
     ]
     return channel_urls
 
