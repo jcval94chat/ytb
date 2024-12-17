@@ -58,6 +58,37 @@ def get_channels():
         "https://www.youtube.com/@irenealbacete",
         "https://www.youtube.com/@bulkin_uri",
         "https://www.youtube.com/@ExitoFinancieroOficial",
+            # Canales en español
+        "https://www.youtube.com/@compuestospodcast",
+        "https://www.youtube.com/@JaimeHigueraEspanol",
+        "https://www.youtube.com/@soycristinadayz",
+        "https://www.youtube.com/@jefillysh",
+        "https://www.youtube.com/@EDteam",
+        "https://www.youtube.com/@LatinoSueco",
+        "https://www.youtube.com/@Ter",
+        "https://www.youtube.com/@doctorfision",
+        "https://www.youtube.com/@EvaMariaBeristain",
+        "https://www.youtube.com/@Unicoos",
+        "https://www.youtube.com/@QuantumFracture",
+        "https://www.youtube.com/@lagatadeschrodinger",
+        "https://www.youtube.com/@CdeCiencia",
+        "https://www.youtube.com/@elrobotdeplaton",
+        # Canales en inglés de ciencia y educación
+        "https://www.youtube.com/@PhysicsGirl",
+        "https://www.youtube.com/@Veritasium",
+        "https://www.youtube.com/@Vsauce",
+        "https://www.youtube.com/@minutephysics",
+        "https://www.youtube.com/@SmarterEveryDay",
+        "https://www.youtube.com/@AsapSCIENCE",
+        "https://www.youtube.com/@PBSSpaceTime",
+        "https://www.youtube.com/@TheActionLab",
+        "https://www.youtube.com/@numberphile",
+        "https://www.youtube.com/@crashcourse",
+        # Canales en inglés de productividad
+        "https://www.youtube.com/@AliAbdaal",
+        "https://www.youtube.com/@ThomasFrank",
+        "https://www.youtube.com/@MattDAvella",
+        "https://www.youtube.com/@NathanielDrew",
     ]
     return channel_urls
 
