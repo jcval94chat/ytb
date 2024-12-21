@@ -89,6 +89,9 @@ def get_channels():
         "https://www.youtube.com/@ThomasFrank",
         "https://www.youtube.com/@MattDAvella",
         "https://www.youtube.com/@NathanielDrew",
+
+        "https://www.youtube.com/@TwoMinutePapers",
+        "https://www.youtube.com/@ElConsejeronocturno",
     ]
     return channel_urls
 
