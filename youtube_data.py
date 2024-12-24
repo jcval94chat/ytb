@@ -89,7 +89,9 @@ def get_channels():
         "https://www.youtube.com/@ThomasFrank",
         "https://www.youtube.com/@MattDAvella",
         "https://www.youtube.com/@NathanielDrew",
-
+        "https://www.youtube.com/@LordDraugr",
+        "https://www.youtube.com/@danielfelipemedina",
+        "https://www.youtube.com/@omareducacionfinanciera",
         "https://www.youtube.com/@TwoMinutePapers",
         "https://www.youtube.com/@ElConsejeronocturno",
     ]
