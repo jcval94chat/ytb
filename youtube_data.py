@@ -12,6 +12,7 @@ import time
 import isodate
 import base64
 import traceback
+from get_urls import get_urls
 
 # Configuración de logging
 logger = logging.getLogger()
@@ -342,9 +343,44 @@ if __name__ == '__main__':
         logging.error(traceback.format_exc())
         exit(1)
 
+    # youtube = build('youtube', 'v3', developerKey=api_key)
+
+    # # Leer los datos existentes en la hoja
+    # try:
+    #     existing_data = pd.DataFrame(sheet.get_all_records())
+    #     logging.info(f"Datos existentes cargados, {len(existing_data)} registros encontrados.")
+    # except Exception as e:
+    #     logging.warning(f"No se pudo leer datos existentes o la hoja está vacía: {str(e)}")
+    #     existing_data = pd.DataFrame()
+
+    # channel_urls = get_channels()
+
+    # all_videos_df = pd.DataFrame()
+
+    # for url in channel_urls:
+    #     channel_id, channel_name = get_channel_id_and_name_from_url(youtube, url)
+    #     if channel_id and channel_name:
+    #         df = get_channel_videos(api_key, channel_id, channel_name, days=90)
+    #         if not df.empty:
+    #             all_videos_df = pd.concat([all_videos_df, df], ignore_index=True)
+    #             logging.info(f"Datos agregados para el canal: {channel_name}")
+    #         else:
+    #             logging.warning(f"No se encontraron videos para el canal: {channel_name}")
+    #     else:
+    #         logging.error(f"No se pudo obtener el ID o nombre del canal para {url}")
+
+    # if all_videos_df.empty:
+    #     logging.error("No se encontraron videos para ninguno de los canales proporcionados.")
+    #     exit(1)
+
+    # # Combinar los datos nuevos con los existentes y eliminar duplicados
+    # if not existing_data.empty:
+    #     combined_df = pd.concat([existing_data, all_videos_df], ignore_index=True)
+    #     combined_df.drop_duplicates(subset=['video_id','channel_name'], inplace=True)
+    # else:
+    #     combined_df = all_videos_df
     youtube = build('youtube', 'v3', developerKey=api_key)
 
-    # Leer los datos existentes en la hoja
     try:
         existing_data = pd.DataFrame(sheet.get_all_records())
         logging.info(f"Datos existentes cargados, {len(existing_data)} registros encontrados.")
@@ -352,7 +388,13 @@ if __name__ == '__main__':
         logging.warning(f"No se pudo leer datos existentes o la hoja está vacía: {str(e)}")
         existing_data = pd.DataFrame()
 
-    channel_urls = get_channels()
+    # Obtener la lista de URLs para el día actual
+    channel_urls = get_urls()
+
+    # Si la lista de canales está vacía, salimos
+    if not channel_urls:
+        logging.info("No hay canales para procesar el día de hoy. Terminando ejecución.")
+        exit(0)
 
     all_videos_df = pd.DataFrame()
 
@@ -369,7 +411,7 @@ if __name__ == '__main__':
             logging.error(f"No se pudo obtener el ID o nombre del canal para {url}")
 
     if all_videos_df.empty:
-        logging.error("No se encontraron videos para ninguno de los canales proporcionados.")
+        logging.error("No se encontraron videos para ninguno de los canales proporcionados en el chunk de hoy.")
         exit(1)
 
     # Combinar los datos nuevos con los existentes y eliminar duplicados
@@ -379,6 +421,7 @@ if __name__ == '__main__':
     else:
         combined_df = all_videos_df
 
+    
     # Filtrar datos de los últimos 90 días
     try:
         logging.info(f"Canales procesados. {len(combined_df['channel_name'].unique())} canales totales con {len(combined_df)} registros")
