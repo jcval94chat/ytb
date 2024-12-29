@@ -62,8 +62,14 @@ def get_urls():
         "https://www.youtube.com/@omareducacionfinanciera",
         "https://www.youtube.com/@TwoMinutePapers",
         "https://www.youtube.com/@ElConsejeronocturno",
-      "https://www.youtube.com/@UnaFisicaSimplificada",
-      "https://www.youtube.com/@gustavo-entrala",
+        "https://www.youtube.com/@UnaFisicaSimplificada",
+        "https://www.youtube.com/@gustavo-entrala",
+        "https://youtube.com/@ricardoalcados",
+        "https://www.youtube.com/@inversioninteligente_alain",
+        "https://www.youtube.com/@MIGALAD",
+        "https://www.youtube.com/@paoalmontes",
+        "https://www.youtube.com/c/Caf%C3%A9Kyoto",
+        "https://www.youtube.com/@watop_esp",
     ]
 
     # Cantidad máxima de canales a procesar por día
