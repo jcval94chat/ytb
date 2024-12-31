@@ -64,12 +64,21 @@ def get_urls():
         "https://www.youtube.com/@ElConsejeronocturno",
         "https://www.youtube.com/@UnaFisicaSimplificada",
         "https://www.youtube.com/@gustavo-entrala",
-        "https://youtube.com/@ricardoalcados",
+        "https://www.youtube.com/@ricardoalcados",
         "https://www.youtube.com/@inversioninteligente_alain",
         "https://www.youtube.com/@MIGALAD",
         "https://www.youtube.com/@paoalmontes",
         "https://www.youtube.com/c/Caf%C3%A9Kyoto",
         "https://www.youtube.com/@watop_esp",
+        "https://www.youtube.com/@jefidos",
+        "https://www.youtube.com/@judithtiral5713",
+        "https://www.youtube.com/@ProgramadorX",
+        "https://www.youtube.com/@NocheDeChicxs",
+        "https://www.youtube.com/@Platzi",
+        "https://www.youtube.com/@DiegoRevueltaTV",
+        "https://www.youtube.com/@MIGALAD",
+        "https://www.youtube.com/@ricardoalcados",
+        "https://www.youtube.com/@lunamartinezoficial",
     ]
 
     # Cantidad máxima de canales a procesar por día
