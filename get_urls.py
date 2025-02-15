@@ -86,7 +86,13 @@ def get_urls():
         "https://www.youtube.com/@witchcalli",
         "https://www.youtube.com/@viyaura",
         "https://www.youtube.com/@ArcadesBooks",
-        "https://www.youtube.com/@DonebyLaura"
+        "https://www.youtube.com/@DonebyLaura",
+        "https://www.youtube.com/@TwoCentsPBS",
+        "https://www.youtube.com/@bravosresearch",
+        "https://www.youtube.com/@ThatNateBlack",
+        "https://www.youtube.com/@DiegoRuzzarin",
+        "https://www.youtube.com/@ManCarryingThing",
+        "https://www.youtube.com/@viyaura",
     ]
 
     # Cantidad máxima de canales a procesar por día
