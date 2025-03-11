@@ -93,6 +93,8 @@ def get_urls():
         "https://www.youtube.com/@DiegoRuzzarin",
         "https://www.youtube.com/@ManCarryingThing",
         "https://www.youtube.com/@viyaura",
+        "https://www.youtube.com/@comofuncionatunegocio",
+        "https://www.youtube.com/@ElConsejeronocturno",
     ]
 
     # Cantidad máxima de canales a procesar por día
