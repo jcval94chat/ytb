@@ -98,6 +98,14 @@ def get_urls():
         "https://www.youtube.com/@98granos",
         "https://www.youtube.com/@WoshingoStreams",
         "https://www.youtube.com/@midulive",
+        "https://www.youtube.com/@AleAbsolutable",
+        "https://www.youtube.com/@RedditHistoriasSinFiltro",
+        "https://www.youtube.com/@SantiagoAmatFinanzas",
+        "https://www.youtube.com/@Brinnn",
+        "https://www.youtube.com/@DrossRotzank",
+        "https://www.youtube.com/@RicardoAlcaraz",
+        "https://www.youtube.com/@RobPaperClips",
+        "https://www.youtube.com/@RobPaperSheet",
     ]
 
     # Cantidad máxima de canales a procesar por día
