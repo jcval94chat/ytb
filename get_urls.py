@@ -106,6 +106,9 @@ def get_urls():
         "https://www.youtube.com/@RicardoAlcaraz",
         "https://www.youtube.com/@RobPaperClips",
         "https://www.youtube.com/@RobPaperSheet",
+        "https://www.youtube.com/@Pinwinsillo",
+        "https://www.youtube.com/@atherion",
+        "https://www.youtube.com/@ProfePiola",
     ]
 
     # Cantidad máxima de canales a procesar por día
