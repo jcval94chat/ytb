@@ -120,6 +120,14 @@ def get_urls():
         "https://www.youtube.com/@Landerdiazdelfresno",
         "https://www.youtube.com/@soydalto",
         "https://www.youtube.com/@ProgramadorX",
+        "https://www.youtube.com/@ELCACHONDO",
+        "https://www.youtube.com/@bravogabobravo",
+        "https://www.youtube.com/@Eze.martinez",
+        "https://www.youtube.com/@vidaprogramador",
+        "https://www.youtube.com/@DotDager",
+        "https://www.youtube.com/@elrincondeldev",
+        "https://www.youtube.com/@mourede",
+        "https://www.youtube.com/@FaztTech",
     ]
 
     # Cantidad máxima de canales a procesar por día
