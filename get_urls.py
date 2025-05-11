@@ -148,7 +148,7 @@ def get_urls():
         "https://www.youtube.com/@TinaHuang1",
         "https://www.youtube.com/@ClaraCarmona",
         "https://www.youtube.com/@jessicafernandezgarcia",
-
+        "https://www.youtube.com/@DonCanitro",
     ]
 
     # Cantidad máxima de canales a procesar por día
