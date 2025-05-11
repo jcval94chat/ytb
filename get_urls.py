@@ -146,6 +146,8 @@ def get_urls():
         "https://www.youtube.com/@HolaMundoDev",
         "https://www.youtube.com/@CreaYTransforma",
         "https://www.youtube.com/@TinaHuang1",
+        "https://www.youtube.com/@ClaraCarmona",
+        "https://www.youtube.com/@jessicafernandezgarcia",
 
     ]
 
