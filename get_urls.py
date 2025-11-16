@@ -151,6 +151,7 @@ def get_urls():
         "https://www.youtube.com/@DonCanitro",
         "https://www.youtube.com/@AI_In_Context",
         "https://www.youtube.com/@TheDiaryOfACEO",
+        "https://www.youtube.com/@GothamChess",
     ]
 
     # Cantidad máxima de canales a procesar por día
