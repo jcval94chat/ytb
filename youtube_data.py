@@ -99,7 +99,7 @@ def get_channels():
     return channel_urls
 
 
-def get_channel_videos(api_key, channel_id, channel_name, days=90):
+def get_channel_videos(api_key, channel_id, channel_name, days=21):
     try:
         youtube = build('youtube', 'v3', developerKey=api_key)
     except Exception as e:
@@ -360,7 +360,7 @@ if __name__ == '__main__':
     # for url in channel_urls:
     #     channel_id, channel_name = get_channel_id_and_name_from_url(youtube, url)
     #     if channel_id and channel_name:
-    #         df = get_channel_videos(api_key, channel_id, channel_name, days=90)
+    #         df = get_channel_videos(api_key, channel_id, channel_name, days=21)
     #         if not df.empty:
     #             all_videos_df = pd.concat([all_videos_df, df], ignore_index=True)
     #             logging.info(f"Datos agregados para el canal: {channel_name}")
@@ -401,7 +401,7 @@ if __name__ == '__main__':
     for url in channel_urls:
         channel_id, channel_name = get_channel_id_and_name_from_url(youtube, url)
         if channel_id and channel_name:
-            df = get_channel_videos(api_key, channel_id, channel_name, days=90)
+            df = get_channel_videos(api_key, channel_id, channel_name, days=21)
             if not df.empty:
                 all_videos_df = pd.concat([all_videos_df, df], ignore_index=True)
                 logging.info(f"Datos agregados para el canal: {channel_name}")
@@ -422,17 +422,17 @@ if __name__ == '__main__':
         combined_df = all_videos_df
 
     
-    # Filtrar datos de los últimos 90 días
+    # Filtrar datos de los últimos 21 días
     try:
         logging.info(f"Canales procesados. {len(combined_df['channel_name'].unique())} canales totales con {len(combined_df)} registros")
         # combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], format='%Y-%m-%dT%H:%M:%S')
-        # cutoff_date = datetime.utcnow() - timedelta(days=90)
+        # cutoff_date = datetime.utcnow() - timedelta(days=21)
         # combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
 
         # Convertir las fechas
         # combined_df['upload_date'] = pd.to_datetime(combined_df['upload_date'], errors='coerce')  # No especificar el formato
         # combined_df = combined_df.dropna(subset=['upload_date'])
-        # cutoff_date = datetime.utcnow() - timedelta(days=90)
+        # cutoff_date = datetime.utcnow() - timedelta(days=21)
         # combined_df = combined_df[combined_df['upload_date'] >= cutoff_date]
         
         logging.info(f"Filtrado de datos completado. {len(combined_df)} registros después del filtro de fecha.")
