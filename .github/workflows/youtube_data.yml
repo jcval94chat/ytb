@@ -1,9 +1,21 @@
-name: Obtener datos de YouTube diariamente
+name: Obtener datos de YouTube semanalmente
 
 on:
   schedule:
-    - cron: '0 0 * * 1-5'  # Ejecuta el trabajo todos los días a medianoche UTC
-  workflow_dispatch:  # Permite ejecutar el flujo de trabajo manualmente
+    - cron: '0 0 * * 1'  # Lunes a las 00:00 UTC
+  workflow_dispatch:
+    inputs:
+      reference_date:
+        description: 'Fecha de referencia opcional (YYYY-MM-DD)'
+        required: false
+        type: string
+      force_chunk_index:
+        description: 'Bloque opcional a procesar manualmente (0 a N-1)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -11,12 +23,13 @@ jobs:
 
     steps:
       - name: Chequear el repositorio
-        uses: actions/checkout@v4  # Actualizado a la versión más reciente
+        uses: actions/checkout@v4
 
       - name: Configurar Python
-        uses: actions/setup-python@v4  # Actualizado a la versión más reciente
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12.7'
+          cache: 'pip'
 
       - name: Instalar dependencias
         run: |
@@ -28,12 +41,14 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GOOGLE_SHEETS_CREDS_BASE64: ${{ secrets.GOOGLE_SHEETS_CREDS_BASE64 }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          REFERENCE_DATE: ${{ github.event.inputs.reference_date }}
+          FORCE_CHUNK_INDEX: ${{ github.event.inputs.force_chunk_index }}
         run: |
           python youtube_data.py
 
       - name: Subir el archivo de logs
         if: always()
-        uses: actions/upload-artifact@v4  # Actualizado a la versión más reciente
+        uses: actions/upload-artifact@v4
         with:
           name: logs
           path: youtube_data.log
