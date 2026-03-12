@@ -388,12 +388,12 @@ if __name__ == '__main__':
         logging.warning(f"No se pudo leer datos existentes o la hoja está vacía: {str(e)}")
         existing_data = pd.DataFrame()
 
-    # Obtener la lista de URLs para el día actual
+    # Obtener la lista de URLs para el bloque semanal actual
     channel_urls = get_urls()
 
     # Si la lista de canales está vacía, salimos
     if not channel_urls:
-        logging.info("No hay canales para procesar el día de hoy. Terminando ejecución.")
+        logging.info("No hay canales para procesar el bloque semanal actual. Terminando ejecución.")
         exit(0)
 
     all_videos_df = pd.DataFrame()
@@ -411,7 +411,7 @@ if __name__ == '__main__':
             logging.error(f"No se pudo obtener el ID o nombre del canal para {url}")
 
     if all_videos_df.empty:
-        logging.error("No se encontraron videos para ninguno de los canales proporcionados en el chunk de hoy.")
+        logging.error("No se encontraron videos para ninguno de los canales proporcionados en el bloque semanal actual.")
         exit(1)
 
     # Combinar los datos nuevos con los existentes y eliminar duplicados
