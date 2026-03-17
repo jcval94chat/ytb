@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Análisis técnico del repositorio ytb</title>
+  <style>
+    :root{
+      --bg:#0b1020;--bg2:#121a33;--card:#151f3d;--text:#e8ecff;--muted:#aab4d6;
+      --acc:#7aa2ff;--ok:#3ddc97;--warn:#ffcc66;--bad:#ff7a90;--line:#2a3763;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg,var(--bg),#070b17);color:var(--text);line-height:1.5}
+    .wrap{max-width:1150px;margin:0 auto;padding:24px}
+    .hero{background:radial-gradient(1200px 400px at 10% -30%,#294a9a66,transparent),var(--bg2);border:1px solid var(--line);border-radius:18px;padding:28px}
+    h1,h2,h3{line-height:1.2;margin:0 0 12px} h1{font-size:clamp(1.6rem,4vw,2.3rem)} h2{font-size:1.4rem;margin-top:34px}
+    p{margin:0 0 10px;color:var(--muted)}
+    .badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+    .badge{padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:#18244a;color:#dfe7ff;font-size:.84rem}
+    .grid{display:grid;gap:14px} .g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+    .call{padding:12px 14px;border-left:4px solid var(--acc);background:#17254f;border-radius:10px}
+    .call.warn{border-left-color:var(--warn)} .call.bad{border-left-color:var(--bad)} .call.ok{border-left-color:var(--ok)}
+    ul{margin:10px 0 0 18px;color:var(--muted)} li{margin:6px 0}
+    table{width:100%;border-collapse:collapse;font-size:.93rem} th,td{border:1px solid var(--line);padding:9px;vertical-align:top} th{background:#1b2a57;text-align:left}
+    code{background:#0f1833;padding:1px 6px;border-radius:6px;border:1px solid #2e406f;color:#dfe8ff}
+    .flow,.arch{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.n{padding:10px 12px;background:#1a2b5a;border:1px solid var(--line);border-radius:10px}
+    .arr{opacity:.75}
+    .small{font-size:.9rem}
+    @media (max-width:700px){.arr{display:none}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <section class="hero">
+    <h1>Análisis técnico integral del repositorio</h1>
+    <p>Pipeline batch en Python que extrae metadatos de videos de YouTube por bloques semanales y sobrescribe un dataset consolidado en Google Sheets.</p>
+    <div class="badges">
+      <span class="badge">Tipo: ETL/Integración batch</span>
+      <span class="badge">Lenguajes: Python + YAML</span>
+      <span class="badge">Runtime: Python 3.12.7 + GitHub Actions</span>
+      <span class="badge">Complejidad: Baja-Media</span>
+      <span class="badge">Confianza del análisis: Alta (código + workflows revisados)</span>
+    </div>
+  </section>
+
+  <h2>1) Resumen ejecutivo</h2>
+  <div class="card">
+    <p>El repo implementa un proceso automático semanal que toma un subconjunto rotativo de canales de YouTube, obtiene sus videos recientes (últimos 60 días), agrega métricas (views/likes/comments), combina con el contenido existente en una hoja de cálculo y escribe todo de nuevo en Google Sheets. El flujo principal está en <code>youtube_data.py</code> y la lógica de partición semanal en <code>get_urls.py</code>. El disparo operativo real está en <code>.github/workflows/youtube_data.yml</code>.</p>
+    <p>Core: extracción YouTube + normalización + merge + escritura en Sheets. Auxiliar: keepalive de repositorio, README incompleto, y archivo heartbeat.</p>
+  </div>
+
+  <h2>2) Arquitectura general</h2>
+  <div class="card">
+    <div class="arch">
+      <div class="n">GitHub Scheduler<br><span class="small">cron semanal/manual</span></div><div class="arr">→</div>
+      <div class="n">Workflow <code>youtube_data.yml</code></div><div class="arr">→</div>
+      <div class="n">Script <code>youtube_data.py</code></div><div class="arr">→</div>
+      <div class="n">YouTube Data API v3</div><div class="arr">→</div>
+      <div class="n">Pandas Merge/Dedup</div><div class="arr">→</div>
+      <div class="n">Google Sheets (sheet1)</div>
+    </div>
+  </div>
+
+  <h2>3) Flujo completo del dato (end-to-end)</h2>
+  <div class="grid g2">
+    <div class="card">
+      <ol>
+        <li><b>Trigger:</b> cron lunes 00:00 UTC o ejecución manual del workflow <code>youtube_data.yml</code>.</li>
+        <li><b>Configuración:</b> carga secretos <code>YOUTUBE_API_KEY</code>, <code>GOOGLE_SHEETS_CREDS_BASE64</code>, <code>SPREADSHEET_ID</code> y opcionales <code>REFERENCE_DATE</code>/<code>FORCE_CHUNK_INDEX</code>.</li>
+        <li><b>Selección de canales:</b> <code>get_urls()</code> elige un bloque de ~40 canales según semana ISO o bloque forzado.</li>
+        <li><b>Resolución de canal:</b> para cada URL, se obtiene <code>channel_id</code> y nombre (casos <code>/channel/</code>, <code>/user/</code>, <code>@handle</code> + fallback por búsqueda).</li>
+        <li><b>Extracción:</b> <code>search().list</code> pide videos desde <code>publishedAfter</code> (60 días), pagina con <code>nextPageToken</code>, luego <code>videos().list</code> trae snippet/contentDetails/statistics.</li>
+        <li><b>Transformación:</b> duración ISO8601→segundos, fecha normalizada, casting de métricas a enteros, agrega <code>execution_date</code>.</li>
+        <li><b>Persistencia:</b> lee todos los registros de la hoja, concatena con los nuevos, dedup por <code>video_id + channel_name</code>, borra hoja y sube dataset completo.</li>
+        <li><b>Errores/logs:</b> logging a consola + <code>youtube_data.log</code>; el workflow sube ese log como artifact siempre.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <div class="flow">
+        <div class="n">Evento cron/manual</div><div class="arr">→</div>
+        <div class="n">Python inicia</div><div class="arr">→</div>
+        <div class="n">Carga env + creds</div><div class="arr">→</div>
+        <div class="n">Bloque semanal</div><div class="arr">→</div>
+        <div class="n">API YouTube</div><div class="arr">→</div>
+        <div class="n">DataFrame</div><div class="arr">→</div>
+        <div class="n">Merge + dedup</div><div class="arr">→</div>
+        <div class="n">Sheet.clear + update</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>4) Componentes principales</h2>
+  <div class="card" style="overflow:auto">
+    <table>
+      <thead><tr><th>Componente</th><th>Ruta</th><th>Responsabilidad</th><th>Entradas</th><th>Salidas</th><th>Dependencias</th><th>Criticidad</th></tr></thead>
+      <tbody>
+        <tr><td>Orquestador ETL</td><td><code>youtube_data.py</code></td><td>Controla extracción, transformación, merge y escritura.</td><td>Env vars, URLs de canales, API responses</td><td>Google Sheet actualizado + log</td><td>pandas, googleapiclient, gspread, isodate</td><td>Alta</td></tr>
+        <tr><td>Selector semanal de canales</td><td><code>get_urls.py</code></td><td>Define lista completa y calcula chunk rotativo semanal.</td><td>Semana ISO / env override</td><td>Lista de URLs a procesar</td><td>datetime, math, os</td><td>Alta</td></tr>
+        <tr><td>CI de ejecución</td><td><code>.github/workflows/youtube_data.yml</code></td><td>Programa y ejecuta script en runner.</td><td>Cron/manual + secrets</td><td>Ejecución batch + artifact log</td><td>setup-python, pip</td><td>Alta</td></tr>
+        <tr><td>Keepalive repo</td><td><code>.github/workflows/keepalive.yml</code></td><td>Hace commit mensual para evitar inactividad.</td><td>Cron mensual</td><td><code>.heartbeat/last-run.txt</code></td><td>git en runner GH</td><td>Media</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>5) Entrypoints reales</h2>
+  <div class="card">
+    <ul>
+      <li><code>python youtube_data.py</code>: entrypoint principal local/CI.</li>
+      <li>Workflow <code>youtube_data.yml</code>: trigger real de producción (schedule + workflow_dispatch con inputs).</li>
+      <li>Workflow <code>keepalive.yml</code>: job auxiliar que comitea heartbeat mensual.</li>
+      <li>No hay API HTTP, workers en cola ni cron del sistema operativo local (todo cronizado en GitHub Actions).</li>
+    </ul>
+  </div>
+
+  <h2>6) Interfaces y movimiento de datos</h2>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Interfaces detectadas</h3>
+      <ul>
+        <li>YouTube Data API v3: endpoints de búsqueda/canales/videos vía <code>googleapiclient.discovery.build</code>.</li>
+        <li>Google Sheets API (vía gspread): lectura completa, limpieza y actualización total de <code>sheet1</code>.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Contratos de datos</h3>
+      <ul>
+        <li>Registro de video: <code>channel_name, video_id, title, description, upload_date, tags, thumbnail_url, duration_seconds, views, likes, comments, execution_date</code>.</li>
+        <li>Deduplicación por clave compuesta <code>video_id + channel_name</code>.</li>
+        <li>No hay esquema versionado formal (JSON Schema/Avro/etc.). <span class="small">Inferencia: riesgo de drift de columnas.</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>7) Ejecución y despliegue</h2>
+  <div class="card">
+    <ul>
+      <li><b>Local:</b> instalar <code>requirements.txt</code>, exportar variables y ejecutar <code>python youtube_data.py</code>.</li>
+      <li><b>Tests:</b> no hay suite de tests automatizados en el repo.</li>
+      <li><b>Despliegue/operación:</b> GitHub Actions sobre <code>ubuntu-latest</code>, Python 3.12.7, cron semanal + manual.</li>
+      <li><b>Infra adicional:</b> no se detectan Dockerfile, compose, Terraform, Kubernetes ni scripts de release.</li>
+      <li><b>Variables críticas:</b> <code>YOUTUBE_API_KEY</code>, <code>GOOGLE_SHEETS_CREDS_BASE64</code>, <code>SPREADSHEET_ID</code>, opcionales <code>REFERENCE_DATE</code>, <code>FORCE_CHUNK_INDEX</code>.</li>
+    </ul>
+  </div>
+
+  <h2>8) Dependencias importantes</h2>
+  <div class="card">
+    <ul>
+      <li><code>google-api-python-client</code>: cliente para YouTube API.</li>
+      <li><code>gspread</code> + <code>google-auth</code>: autenticación service account y operaciones de hoja.</li>
+      <li><code>pandas</code>: consolidación tabular y deduplicación.</li>
+      <li><code>isodate</code>: parseo de fechas/duraciones ISO.</li>
+    </ul>
+  </div>
+
+  <h2>9) Caso práctico narrado</h2>
+  <div class="card">
+    <p>Un lunes se ejecuta el workflow. Si no hay override, la semana ISO define el bloque de canales. Para cada canal, el script resuelve su ID, obtiene videos publicados en 60 días, normaliza métricas y duración, acumula filas, une con histórico de Google Sheets y elimina duplicados. Finalmente, borra la hoja y la vuelve a poblar completa. El equipo consumidor puede seguir leyendo una sola hoja consolidada con información reciente y acumulada.</p>
+  </div>
+
+  <h2>10) Riesgos y puntos ciegos</h2>
+  <div class="grid g2">
+    <div class="call bad"><b>Hecho confirmado:</b> el script ejecuta <code>sheet.clear()</code> antes de escribir; una falla posterior puede dejar la hoja vacía o parcial.</div>
+    <div class="call warn"><b>Hecho confirmado:</b> no hay tests automáticos; cambios en parsing/API pueden romper en runtime.</div>
+    <div class="call warn"><b>Hecho confirmado:</b> manejo de <code>@handle</code> usa <code>forUsername</code> y fallback search; puede devolver canal incorrecto si la búsqueda es ambigua.</div>
+    <div class="call"><b>Inferencia:</b> posible presión de cuota API por alto volumen de canales y paginación por canal.</div>
+    <div class="call"><b>Inferencia:</b> duplicidad de fuente de canales (función <code>get_channels()</code> y <code>CHANNEL_URLS</code>) puede introducir drift funcional.</div>
+  </div>
+
+  <h2>11) Evidencia técnica</h2>
+  <div class="card">
+    <p><b>Archivos/rutas y piezas clave citadas:</b></p>
+    <ul>
+      <li><code>youtube_data.py</code>: funciones <code>get_channel_videos</code>, <code>iso_duration_to_seconds</code>, <code>get_channel_id_and_name_from_url</code>, bloque <code>__main__</code>.</li>
+      <li><code>get_urls.py</code>: <code>CHANNEL_URLS</code>, <code>_resolve_reference_date</code>, <code>_resolve_chunk_index</code>, <code>get_weekly_chunk_info</code>, <code>get_urls</code>.</li>
+      <li><code>.github/workflows/youtube_data.yml</code>: cron semanal, inputs manuales y variables de entorno hacia el script.</li>
+      <li><code>.github/workflows/keepalive.yml</code>: commit/push mensual de <code>.heartbeat/last-run.txt</code>.</li>
+      <li><code>requirements.txt</code>: stack técnico real de ejecución.</li>
+      <li><code>README.md</code>: contexto declarativo (parcial/incompleto frente al código real).</li>
+    </ul>
+    <p><b>Top 10 archivos para entender el repo rápido:</b><br>
+      1) <code>youtube_data.py</code> · 2) <code>get_urls.py</code> · 3) <code>.github/workflows/youtube_data.yml</code> · 4) <code>requirements.txt</code> · 5) <code>.github/workflows/keepalive.yml</code> · 6) <code>README.md</code> · 7) <code>.heartbeat/last-run.txt</code> · 8) <code>archivos/a.txt</code> (sin impacto funcional) · 9) historial git del pipeline (contexto operativo) · 10) artifact <code>youtube_data.log</code> generado en runtime.</p>
+  </div>
+</div>
+</body>
+</html>
