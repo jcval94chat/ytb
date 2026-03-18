@@ -1,21 +1,39 @@
-name: Obtener datos de YouTube semanalmente
+name: Obtener datos de YouTube diariamente
 
 on:
   schedule:
-    - cron: '0 0 * * 1'  # Lunes a las 00:00 UTC
+    - cron: '0 0 * * *'  # Diario a las 00:00 UTC
   workflow_dispatch:
     inputs:
-      reference_date:
-        description: 'Fecha de referencia opcional (YYYY-MM-DD)'
+      days:
+        description: 'Ventana de días para el snapshot actual'
         required: false
         type: string
-      force_chunk_index:
-        description: 'Bloque opcional a procesar manualmente (0 a N-1)'
+      channel_limit:
+        description: 'Límite opcional de canales a procesar'
         required: false
         type: string
+      channel_filter:
+        description: 'Filtro opcional por channel_id, nombre o URL normalizada'
+        required: false
+        type: string
+      force_refresh_registry:
+        description: 'Forzar refresco de channel_registry ignorando caché válida'
+        required: false
+        default: false
+        type: boolean
+      write_history:
+        description: 'Escribir también en videos_history (append-only)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+
+concurrency:
+  group: youtube-data-daily
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -38,17 +56,25 @@ jobs:
 
       - name: Ejecutar el script
         env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GOOGLE_SHEETS_CREDS_BASE64: ${{ secrets.GOOGLE_SHEETS_CREDS_BASE64 }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          REFERENCE_DATE: ${{ github.event.inputs.reference_date }}
-          FORCE_CHUNK_INDEX: ${{ github.event.inputs.force_chunk_index }}
+          DAYS: ${{ github.event.inputs.days }}
+          CHANNEL_LIMIT: ${{ github.event.inputs.channel_limit }}
+          CHANNEL_FILTER: ${{ github.event.inputs.channel_filter }}
+          FORCE_REFRESH_REGISTRY: ${{ github.event.inputs.force_refresh_registry }}
+          WRITE_HISTORY: ${{ github.event.inputs.write_history }}
         run: |
           python youtube_data.py
 
-      - name: Subir el archivo de logs
+      - name: Subir logs y reportes operativos
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: logs
-          path: youtube_data.log
+          name: youtube-data-artifacts
+          path: |
+            youtube_data.log
+            run_report.json
+            unresolved_urls.json
+            channel_failures.json

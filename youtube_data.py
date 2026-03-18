@@ -2,18 +2,19 @@ import base64
 import json
 import logging
 import os
-import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import gspread
 import isodate
 import pandas as pd
+import requests
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-from get_urls import get_urls
+from get_urls import get_urls, normalize_channel_url
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -29,6 +30,28 @@ if not logger.handlers:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
+
+VIDEOS_CURRENT_SHEET = 'videos_current_60d'
+VIDEOS_HISTORY_SHEET = 'videos_history'
+CHANNEL_REGISTRY_SHEET = 'channel_registry'
+HTTP_REDIRECT_TIMEOUT_SECONDS = 5
+DEFAULT_LOOKBACK_DAYS = 60
+RUN_REPORT_PATH = 'run_report.json'
+UNRESOLVED_URLS_PATH = 'unresolved_urls.json'
+CHANNEL_FAILURES_PATH = 'channel_failures.json'
+
+CHANNEL_REGISTRY_COLUMNS = [
+    'source_url',
+    'normalized_url',
+    'channel_id',
+    'uploads_playlist_id',
+    'channel_name',
+    'resolver_type',
+    'active',
+    'resolution_status',
+    'last_verified_at',
+    'last_error',
+]
 
 EXPORT_COLUMNS = [
     'channel_name',
@@ -79,6 +102,12 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+
+def utc_now_iso() -> str:
+    return utc_now().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+
 def normalize_text(value: Any) -> str:
     if value is None:
         return ''
@@ -94,12 +123,126 @@ def normalize_text(value: Any) -> str:
 
 
 
+def normalize_bool_text(value: Any) -> str:
+    normalized_value = normalize_text(value).strip().lower()
+    return 'true' if normalized_value == 'true' else 'false'
+
+
+
+def prepare_dataframe_with_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    prepared_df = df.copy()
+
+    for column in columns:
+        if column not in prepared_df.columns:
+            prepared_df[column] = ''
+
+    prepared_df = prepared_df[columns]
+    prepared_df = prepared_df.fillna('')
+
+    for column in prepared_df.columns:
+        prepared_df[column] = prepared_df[column].map(normalize_text)
+
+    return prepared_df
+
+
+
+def parse_positive_int_env(var_name: str, default: int) -> int:
+    raw_value = os.environ.get(var_name, '').strip()
+    if not raw_value:
+        return default
+    parsed_value = int(raw_value)
+    if parsed_value <= 0:
+        raise ValueError(f'{var_name} debe ser mayor que 0.')
+    return parsed_value
+
+
+
+def parse_optional_positive_int_env(var_name: str) -> int | None:
+    raw_value = os.environ.get(var_name, '').strip()
+    if not raw_value:
+        return None
+    parsed_value = int(raw_value)
+    if parsed_value <= 0:
+        raise ValueError(f'{var_name} debe ser mayor que 0.')
+    return parsed_value
+
+
+
+def parse_bool_env(var_name: str, default: bool = False) -> bool:
+    raw_value = os.environ.get(var_name, '').strip().lower()
+    if not raw_value:
+        return default
+    return raw_value in {'1', 'true', 'yes', 'y', 'on'}
+
+
+
+def detect_execution_mode() -> str:
+    return 'scheduled' if os.environ.get('GITHUB_EVENT_NAME', '').strip() == 'schedule' else 'manual'
+
+
+
+def create_run_report(started_at: str) -> dict[str, Any]:
+    return {
+        'channels_total': 0,
+        'channels_processed': 0,
+        'channels_failed': 0,
+        'rows_current_snapshot': 0,
+        'registry_rows_total': 0,
+        'registry_rows_active': 0,
+        'registry_rows_failed': 0,
+        'new_channels_resolved_this_run': 0,
+        'videos_discovered': 0,
+        'videos_exported': 0,
+        'execution_mode': detect_execution_mode(),
+        'days_window': DEFAULT_LOOKBACK_DAYS,
+        'channel_limit_applied': '',
+        'channel_filter_applied': '',
+        'write_history_enabled': 'false',
+        'history_rows_appended': 0,
+        'api_calls': {
+            'channels_list': 0,
+            'playlistitems_list': 0,
+            'videos_list': 0,
+            'search_list': 0,
+        },
+        'unresolved_urls': [],
+        'channel_failures': [],
+        'started_at': started_at,
+        'finished_at': '',
+    }
+
+
+
+def increment_api_call(run_report: dict[str, Any], api_name: str) -> None:
+    run_report.setdefault('api_calls', {})
+    run_report['api_calls'][api_name] = int(run_report['api_calls'].get(api_name, 0)) + 1
+
+
+
+def write_json_file(data: Any, path: str) -> None:
+    with open(path, 'w', encoding='utf-8') as file_handle:
+        json.dump(data, file_handle, ensure_ascii=False, indent=2)
+
+
+
+def write_run_report(run_report: dict[str, Any], path: str = RUN_REPORT_PATH) -> None:
+    write_json_file(run_report, path)
+
+
+
+def write_operational_artifacts(run_report: dict[str, Any]) -> None:
+    write_run_report(run_report)
+    write_json_file(run_report.get('unresolved_urls', []), UNRESOLVED_URLS_PATH)
+    write_json_file(run_report.get('channel_failures', []), CHANNEL_FAILURES_PATH)
+
+
+
 def iso_duration_to_seconds(duration: str) -> int:
     try:
         parsed_duration = isodate.parse_duration(duration)
         return int(parsed_duration.total_seconds())
     except Exception as exc:
-        logger.error(f"Error al convertir la duración {duration}: {str(exc)}")
+        logger.error(f'Error al convertir la duración {duration}: {str(exc)}')
         logger.error(traceback.format_exc())
         return 0
 
@@ -115,7 +258,13 @@ def parse_upload_datetime(upload_date_str: str | None) -> datetime | None:
 
 
 
-def fetch_channel_context(youtube: Any, channel_id: str, channel_name: str, channel_url: str) -> dict[str, str]:
+def fetch_channel_context(
+    youtube: Any,
+    channel_id: str,
+    channel_name: str,
+    channel_url: str,
+    run_report: dict[str, Any] | None = None,
+) -> dict[str, str]:
     context = {
         'channel_name': channel_name,
         'channel_id': channel_id,
@@ -129,6 +278,8 @@ def fetch_channel_context(youtube: Any, channel_id: str, channel_name: str, chan
     }
 
     try:
+        if run_report is not None:
+            increment_api_call(run_report, 'channels_list')
         response = youtube.channels().list(
             part='snippet,statistics',
             id=channel_id,
@@ -148,7 +299,7 @@ def fetch_channel_context(youtube: Any, channel_id: str, channel_name: str, chan
         })
     except Exception as exc:
         logger.warning(
-            "No se pudo obtener el contexto extendido del canal %s (%s): %s",
+            'No se pudo obtener el contexto extendido del canal %s (%s): %s',
             channel_name,
             channel_id,
             str(exc),
@@ -175,17 +326,11 @@ def build_video_record(
     upload_datetime = parse_upload_datetime(snippet.get('publishedAt'))
     upload_date = upload_datetime.strftime('%Y-%m-%dT%H:%M:%S') if upload_datetime else ''
     published_at_utc = upload_datetime.strftime('%Y-%m-%dT%H:%M:%SZ') if upload_datetime else ''
-    days_since_upload = (
-        str(max((execution_time - upload_datetime).days, 0))
-        if upload_datetime
-        else ''
-    )
+    days_since_upload = str(max((execution_time - upload_datetime).days, 0)) if upload_datetime else ''
     views = int(statistics.get('viewCount', 0) or 0)
     likes = int(statistics.get('likeCount', 0) or 0)
     comments = int(statistics.get('commentCount', 0) or 0)
-    engagement_rate = (
-        f"{((likes + comments) / views):.6f}" if views > 0 else '0.000000'
-    )
+    engagement_rate = f'{((likes + comments) / views):.6f}' if views > 0 else '0.000000'
     video_id = normalize_text(item.get('id'))
 
     record = {
@@ -229,19 +374,15 @@ def build_video_record(
 
 
 def prepare_dataframe_for_export(df: pd.DataFrame) -> pd.DataFrame:
-    export_df = df.copy()
+    return prepare_dataframe_with_columns(df, EXPORT_COLUMNS)
 
-    for column in EXPORT_COLUMNS:
-        if column not in export_df.columns:
-            export_df[column] = ''
 
-    export_df = export_df[EXPORT_COLUMNS]
-    export_df = export_df.fillna('')
 
-    for column in export_df.columns:
-        export_df[column] = export_df[column].map(normalize_text)
-
-    return export_df
+def prepare_channel_registry_for_export(df: pd.DataFrame) -> pd.DataFrame:
+    registry_df = prepare_dataframe_with_columns(df, CHANNEL_REGISTRY_COLUMNS)
+    if not registry_df.empty:
+        registry_df['active'] = registry_df['active'].map(normalize_bool_text)
+    return registry_df
 
 
 
@@ -287,251 +428,560 @@ def ensure_sheet_capacity(sheet: Any, required_rows: int, required_cols: int) ->
 
 
 
-def get_channels() -> list[str]:
-    return [
-        "https://www.youtube.com/@MarianoTrejo",
-        "https://www.youtube.com/@humphrey",
-        "https://www.youtube.com/@MisPropiasFinanzas",
-        "https://www.youtube.com/@AdriàSolàPastor",
-        "https://www.youtube.com/@EduardoRosas",
-        "https://www.youtube.com/@CésarDabiánFinanzas",
-        "https://www.youtube.com/@soycristinadayz",
-        "https://www.youtube.com/@MorisDieck",
-        "https://www.youtube.com/@AdrianSaenz",
-        "https://www.youtube.com/@FinanzasparatodosYT",
-        "https://www.youtube.com/@LuisMiNegocios",
-        "https://www.youtube.com/@AprendizFinanciero",
-        "https://www.youtube.com/@negociosyfinanzas2559",
-        "https://www.youtube.com/@pequenocerdocapitalista",
-        "https://www.youtube.com/@AlexHormozi",
-        "https://www.youtube.com/@CalebHammer",
-        "https://www.youtube.com/c/Myprimermillón",
-        "https://www.youtube.com/@starterstory",
-        "https://www.youtube.com/@irenealbacete",
-        "https://www.youtube.com/@bulkin_uri",
-        "https://www.youtube.com/@ExitoFinancieroOficial",
-        "https://www.youtube.com/@compuestospodcast",
-        "https://www.youtube.com/@JaimeHigueraEspanol",
-        "https://www.youtube.com/@soycristinadayz",
-        "https://www.youtube.com/@jefillysh",
-        "https://www.youtube.com/@EDteam",
-        "https://www.youtube.com/@LatinoSueco",
-        "https://www.youtube.com/@Ter",
-        "https://www.youtube.com/@doctorfision",
-        "https://www.youtube.com/@EvaMariaBeristain",
-        "https://www.youtube.com/@Unicoos",
-        "https://www.youtube.com/@QuantumFracture",
-        "https://www.youtube.com/@lagatadeschrodinger",
-        "https://www.youtube.com/@CdeCiencia",
-        "https://www.youtube.com/@elrobotdeplaton",
-        "https://www.youtube.com/@PhysicsGirl",
-        "https://www.youtube.com/@Veritasium",
-        "https://www.youtube.com/@Vsauce",
-        "https://www.youtube.com/@minutephysics",
-        "https://www.youtube.com/@SmarterEveryDay",
-        "https://www.youtube.com/@AsapSCIENCE",
-        "https://www.youtube.com/@PBSSpaceTime",
-        "https://www.youtube.com/@TheActionLab",
-        "https://www.youtube.com/@numberphile",
-        "https://www.youtube.com/@crashcourse",
-        "https://www.youtube.com/@AliAbdaal",
-        "https://www.youtube.com/@ThomasFrank",
-        "https://www.youtube.com/@MattDAvella",
-        "https://www.youtube.com/@NathanielDrew",
-        "https://www.youtube.com/@LordDraugr",
-        "https://www.youtube.com/@danielfelipemedina",
-        "https://www.youtube.com/@omareducacionfinanciera",
-        "https://www.youtube.com/@TwoMinutePapers",
-        "https://www.youtube.com/@ElConsejeronocturno",
-    ]
-
-
-
-def get_channel_videos(api_key: str, channel_id: str, channel_name: str, channel_url: str = '', days: int = 60) -> pd.DataFrame:
+def get_or_create_worksheet(spreadsheet: Any, title: str, rows: int = 1000, cols: int = 50) -> Any:
     try:
-        youtube = build('youtube', 'v3', developerKey=api_key)
-    except Exception as exc:
-        logger.error(f"Error al inicializar el cliente de YouTube API: {str(exc)}")
-        return pd.DataFrame(columns=EXPORT_COLUMNS)
+        worksheet = spreadsheet.worksheet(title)
+        logger.info('Usando worksheet existente: "%s".', title)
+        return worksheet
+    except gspread.WorksheetNotFound:
+        logger.info('La worksheet "%s" no existe. Creándola.', title)
+        return spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
+
+
+
+def write_replace_sheet(sheet: Any, df: pd.DataFrame) -> None:
+    export_df = prepare_dataframe_for_export(df)
+    required_rows = max(len(export_df) + 1, 1)
+    required_cols = max(len(EXPORT_COLUMNS), 1)
+    ensure_sheet_capacity(sheet, required_rows=required_rows, required_cols=required_cols)
+    payload = [EXPORT_COLUMNS] + export_df.values.tolist()
+    sheet.clear()
+    sheet.update(payload)
+    logger.info('Worksheet "%s" reemplazada con %s registros.', getattr(sheet, 'title', '<sin título>'), len(export_df))
+
+
+
+def append_sheet_rows(sheet: Any, df: pd.DataFrame) -> None:
+    export_df = prepare_dataframe_for_export(df)
+    if export_df.empty:
+        logger.info('No hay registros para append en la worksheet "%s".', getattr(sheet, 'title', '<sin título>'))
+        return
+
+    existing_header = []
+    try:
+        existing_header = sheet.row_values(1)
+    except Exception:
+        existing_header = []
+
+    if existing_header != EXPORT_COLUMNS:
+        write_replace_sheet(sheet, pd.DataFrame(columns=EXPORT_COLUMNS))
+
+    required_rows = max(getattr(sheet, 'row_count', 0), len(export_df) + 1)
+    ensure_sheet_capacity(sheet, required_rows=required_rows, required_cols=len(EXPORT_COLUMNS))
+    sheet.append_rows(export_df.values.tolist(), value_input_option='RAW')
+    logger.info('Se agregaron %s registros a la worksheet "%s".', len(export_df), getattr(sheet, 'title', '<sin título>'))
+
+
+
+def load_channel_registry(spreadsheet: Any) -> pd.DataFrame:
+    sheet = get_or_create_worksheet(spreadsheet, CHANNEL_REGISTRY_SHEET)
 
     try:
-        cutoff_datetime = utc_now() - timedelta(days=days)
-        cutoff_date = cutoff_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
-        logger.info('Fecha de corte calculada para %s: %s', channel_name, cutoff_date)
+        records = sheet.get_all_records()
     except Exception as exc:
-        logger.error(f"Error al calcular la fecha de corte: {str(exc)}")
-        return pd.DataFrame(columns=EXPORT_COLUMNS)
+        logger.warning('No se pudo leer la worksheet "%s": %s', sheet.title, str(exc))
+        records = []
 
-    channel_context = fetch_channel_context(youtube, channel_id, channel_name, channel_url)
-    execution_time = utc_now()
-    videos: list[dict[str, str]] = []
+    if not records:
+        return pd.DataFrame(columns=CHANNEL_REGISTRY_COLUMNS)
+
+    return prepare_channel_registry_for_export(pd.DataFrame(records))
+
+
+
+def write_channel_registry(spreadsheet: Any, df: pd.DataFrame) -> None:
+    sheet = get_or_create_worksheet(spreadsheet, CHANNEL_REGISTRY_SHEET)
+    registry_df = prepare_channel_registry_for_export(df)
+    required_rows = max(len(registry_df) + 1, 1)
+    required_cols = len(CHANNEL_REGISTRY_COLUMNS)
+    ensure_sheet_capacity(sheet, required_rows=required_rows, required_cols=required_cols)
+    payload = [CHANNEL_REGISTRY_COLUMNS] + registry_df.values.tolist()
+    sheet.clear()
+    sheet.update(payload)
+    logger.info('Channel registry actualizado con %s filas.', len(registry_df))
+
+
+
+def build_channel_registry_error_row(source_url: str, normalized_url: str, resolver_type: str, error_message: str) -> dict[str, str]:
+    return {
+        'source_url': source_url,
+        'normalized_url': normalized_url,
+        'channel_id': '',
+        'uploads_playlist_id': '',
+        'channel_name': '',
+        'resolver_type': resolver_type,
+        'active': 'true',
+        'resolution_status': 'error',
+        'last_verified_at': utc_now_iso(),
+        'last_error': normalize_text(error_message),
+    }
+
+
+
+def build_channel_registry_row(
+    source_url: str,
+    normalized_url: str,
+    channel_item: dict[str, Any],
+    resolver_type: str,
+) -> dict[str, str]:
+    snippet = channel_item.get('snippet', {})
+    content_details = channel_item.get('contentDetails', {})
+    related_playlists = content_details.get('relatedPlaylists', {})
+
+    return {
+        'source_url': source_url,
+        'normalized_url': normalized_url,
+        'channel_id': normalize_text(channel_item.get('id')),
+        'uploads_playlist_id': normalize_text(related_playlists.get('uploads')),
+        'channel_name': normalize_text(snippet.get('title')),
+        'resolver_type': resolver_type,
+        'active': 'true',
+        'resolution_status': 'resolved',
+        'last_verified_at': utc_now_iso(),
+        'last_error': '',
+    }
+
+
+
+def fetch_channel_item(
+    youtube: Any,
+    run_report: dict[str, Any] | None,
+    *,
+    resolver_type: str,
+    id: str | None = None,
+    for_username: str | None = None,
+    for_handle: str | None = None,
+) -> tuple[dict[str, Any] | None, str]:
+    if run_report is not None:
+        increment_api_call(run_report, 'channels_list')
+    response = youtube.channels().list(
+        part='snippet,contentDetails',
+        id=id,
+        forUsername=for_username,
+        forHandle=for_handle,
+        maxResults=1,
+    ).execute()
+    items = response.get('items') or []
+    if not items:
+        return None, resolver_type
+    return items[0], resolver_type
+
+
+
+def resolve_channel_by_search(youtube: Any, normalized_url: str, run_report: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, str]:
+    path = urlsplit(normalized_url).path.rstrip('/')
+    query = path.split('/')[-1].lstrip('@')
+    if not query:
+        return None, 'search_fallback'
+
+    if run_report is not None:
+        increment_api_call(run_report, 'search_list')
+    response = youtube.search().list(
+        part='snippet',
+        q=query,
+        type='channel',
+        maxResults=1,
+    ).execute()
+    items = response.get('items') or []
+    if not items:
+        return None, 'search_fallback'
+
+    channel_id = normalize_text(items[0].get('snippet', {}).get('channelId'))
+    if not channel_id:
+        return None, 'search_fallback'
+
+    return fetch_channel_item(youtube, run_report, resolver_type='search_fallback', id=channel_id)
+
+
+
+def follow_channel_redirect(url: str) -> str:
+    response = requests.get(url, timeout=HTTP_REDIRECT_TIMEOUT_SECONDS, allow_redirects=True)
+    return normalize_channel_url(response.url)
+
+
+
+def resolve_channel_url(
+    youtube: Any,
+    source_url: str,
+    normalized_url: str | None = None,
+    allow_redirect_fallback: bool = True,
+    run_report: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    normalized_url = normalized_url or normalize_channel_url(source_url)
+    path = urlsplit(normalized_url).path.rstrip('/')
+
+    try:
+        if '/channel/' in path:
+            channel_id = path.split('/channel/')[1].split('/')[0]
+            channel_item, resolver_type = fetch_channel_item(youtube, run_report, resolver_type='channel_id', id=channel_id)
+        elif '/user/' in path:
+            username = path.split('/user/')[1].split('/')[0]
+            channel_item, resolver_type = fetch_channel_item(youtube, run_report, resolver_type='username', for_username=username)
+        elif path.startswith('/@') or '/@' in path:
+            handle = path.split('@', 1)[1].split('/')[0]
+            channel_item, resolver_type = fetch_channel_item(youtube, run_report, resolver_type='handle', for_handle=handle)
+        else:
+            channel_item = None
+            resolver_type = 'unknown'
+
+        if channel_item:
+            return build_channel_registry_row(source_url, normalized_url, channel_item, resolver_type)
+
+        if allow_redirect_fallback:
+            redirected_url = follow_channel_redirect(normalized_url)
+            if redirected_url and redirected_url != normalized_url:
+                redirected_resolution = resolve_channel_url(
+                    youtube,
+                    source_url=source_url,
+                    normalized_url=redirected_url,
+                    allow_redirect_fallback=False,
+                    run_report=run_report,
+                )
+                if redirected_resolution.get('resolution_status') == 'resolved':
+                    redirected_resolution['normalized_url'] = redirected_url
+                    redirected_resolution['resolver_type'] = f'redirect_{redirected_resolution["resolver_type"]}'
+                    return redirected_resolution
+
+        channel_item, resolver_type = resolve_channel_by_search(youtube, normalized_url, run_report=run_report)
+        if channel_item:
+            return build_channel_registry_row(source_url, normalized_url, channel_item, resolver_type)
+
+        return build_channel_registry_error_row(
+            source_url,
+            normalized_url,
+            resolver_type='unresolved',
+            error_message=f'No se pudo resolver la URL del canal: {normalized_url}',
+        )
+    except Exception as exc:
+        logger.warning('Error resolviendo canal %s: %s', normalized_url, str(exc))
+        logger.warning(traceback.format_exc())
+        return build_channel_registry_error_row(
+            source_url,
+            normalized_url,
+            resolver_type='exception',
+            error_message=str(exc),
+        )
+
+
+
+def deduplicate_channel_registry(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return prepare_channel_registry_for_export(df)
+
+    registry_df = prepare_channel_registry_for_export(df)
+    registry_df['active_rank'] = registry_df['active'].map(lambda value: 1 if normalize_bool_text(value) == 'true' else 0)
+    registry_df['resolved_rank'] = registry_df['resolution_status'].map(lambda value: 1 if value == 'resolved' else 0)
+    registry_df = registry_df.sort_values(
+        by=['resolved_rank', 'active_rank', 'last_verified_at', 'normalized_url'],
+        ascending=[False, False, False, True],
+        kind='stable',
+    )
+
+    resolved_rows = registry_df[registry_df['channel_id'] != ''].drop_duplicates(subset=['channel_id'], keep='first')
+    unresolved_rows = registry_df[registry_df['channel_id'] == ''].drop_duplicates(subset=['normalized_url'], keep='first')
+    deduplicated = pd.concat([resolved_rows, unresolved_rows], ignore_index=True)
+    deduplicated = deduplicated.drop(columns=['active_rank', 'resolved_rank'], errors='ignore')
+    deduplicated = deduplicated.sort_values(by=['active', 'channel_name', 'normalized_url'], ascending=[False, True, True], kind='stable')
+    return prepare_channel_registry_for_export(deduplicated)
+
+
+
+def sync_channel_registry_from_urls(
+    youtube: Any,
+    spreadsheet: Any,
+    urls: list[str],
+    run_report: dict[str, Any] | None = None,
+    force_refresh: bool = False,
+) -> pd.DataFrame:
+    registry_df = load_channel_registry(spreadsheet)
+    registry_by_url = {record['normalized_url']: record for record in registry_df.to_dict(orient='records')} if not registry_df.empty else {}
+    normalized_urls = {normalize_channel_url(url) for url in urls}
+    desired_rows: list[dict[str, str]] = []
+
+    for source_url in urls:
+        normalized_url = normalize_channel_url(source_url)
+        cached_row = registry_by_url.get(normalized_url)
+
+        if (
+            not force_refresh
+            and cached_row
+            and cached_row.get('channel_id')
+            and cached_row.get('uploads_playlist_id')
+            and cached_row.get('resolution_status') == 'resolved'
+        ):
+            cached_copy = dict(cached_row)
+            cached_copy['source_url'] = source_url
+            cached_copy['normalized_url'] = normalized_url
+            cached_copy['active'] = 'true'
+            desired_rows.append(cached_copy)
+            continue
+
+        resolved_row = resolve_channel_url(
+            youtube,
+            source_url=source_url,
+            normalized_url=normalized_url,
+            run_report=run_report,
+        )
+        if run_report is not None and resolved_row.get('resolution_status') == 'resolved':
+            run_report['new_channels_resolved_this_run'] += 1
+        desired_rows.append(resolved_row)
+
+    inactive_rows: list[dict[str, str]] = []
+    for normalized_url, row in registry_by_url.items():
+        if normalized_url in normalized_urls:
+            continue
+        inactive_row = dict(row)
+        inactive_row['active'] = 'false'
+        inactive_rows.append(inactive_row)
+
+    combined_df = pd.DataFrame(desired_rows + inactive_rows, columns=CHANNEL_REGISTRY_COLUMNS)
+    combined_df = deduplicate_channel_registry(combined_df)
+    write_channel_registry(spreadsheet, combined_df)
+    return combined_df
+
+
+
+def get_active_resolved_channels(registry_df: pd.DataFrame) -> pd.DataFrame:
+    if registry_df.empty:
+        return registry_df
+
+    active_channels = registry_df[
+        (registry_df['active'].map(normalize_bool_text) == 'true')
+        & (registry_df['resolution_status'] == 'resolved')
+        & (registry_df['channel_id'] != '')
+        & (registry_df['uploads_playlist_id'] != '')
+    ].copy()
+
+    if active_channels.empty:
+        return active_channels
+
+    return active_channels.drop_duplicates(subset=['channel_id'], keep='first').reset_index(drop=True)
+
+
+
+def filter_channels_dataframe(channels_df: pd.DataFrame, channel_filter: str = '', channel_limit: int | None = None) -> pd.DataFrame:
+    filtered_df = channels_df.copy()
+    normalized_filter = channel_filter.strip().lower()
+
+    if normalized_filter and not filtered_df.empty:
+        mask = (
+            filtered_df['channel_name'].fillna('').str.lower().str.contains(normalized_filter, regex=False)
+            | filtered_df['normalized_url'].fillna('').str.lower().str.contains(normalized_filter, regex=False)
+            | filtered_df['channel_id'].fillna('').str.lower().str.contains(normalized_filter, regex=False)
+        )
+        filtered_df = filtered_df[mask].copy()
+
+    if channel_limit is not None:
+        filtered_df = filtered_df.head(channel_limit).copy()
+
+    return filtered_df.reset_index(drop=True)
+
+
+
+def list_recent_video_ids_from_uploads(
+    youtube: Any,
+    uploads_playlist_id: str,
+    days: int = DEFAULT_LOOKBACK_DAYS,
+    run_report: dict[str, Any] | None = None,
+) -> list[str]:
+    cutoff_datetime = utc_now() - timedelta(days=days)
+    video_ids: list[str] = []
+    seen_video_ids: set[str] = set()
     next_page_token = None
 
     while True:
-        try:
-            res = youtube.search().list(
-                part='snippet',
-                channelId=channel_id,
-                publishedAfter=cutoff_date,
-                maxResults=50,
-                pageToken=next_page_token,
-                order='date',
-                type='video',
-            ).execute()
-            logger.info('Obtenidos videos de la página con token %s para %s.', next_page_token, channel_name)
-        except Exception as exc:
-            logger.error(f"Error al obtener videos del canal {channel_name}: {str(exc)}")
+        if run_report is not None:
+            increment_api_call(run_report, 'playlistitems_list')
+        response = youtube.playlistItems().list(
+            part='snippet,contentDetails,status',
+            playlistId=uploads_playlist_id,
+            maxResults=50,
+            pageToken=next_page_token,
+        ).execute()
+        items = response.get('items') or []
+        if not items:
             break
 
-        if not res.get('items'):
-            logger.warning(f"La respuesta de búsqueda está vacía para el canal {channel_name}.")
-            break
+        for item in items:
+            content_details = item.get('contentDetails', {})
+            video_id = normalize_text(content_details.get('videoId'))
+            published_at = content_details.get('videoPublishedAt') or item.get('snippet', {}).get('publishedAt')
+            published_datetime = parse_upload_datetime(published_at)
 
-        try:
-            video_ids = [item['id']['videoId'] for item in res.get('items', [])]
-            if not video_ids:
-                logger.info(f"No se encontraron más videos para el canal {channel_name}")
-                break
-        except KeyError as exc:
-            logger.error(f"Error al extraer IDs de videos: {str(exc)}")
-            break
-
-        try:
-            stats_res = youtube.videos().list(
-                part='snippet,contentDetails,statistics,status',
-                id=','.join(video_ids),
-            ).execute()
-            logger.info('Obtenidos detalles de %s videos para %s.', len(video_ids), channel_name)
-        except Exception as exc:
-            logger.error(f"Error al obtener detalles de videos: {str(exc)}")
-            break
-
-        if not stats_res.get('items'):
-            logger.warning(f"No se obtuvieron detalles de videos para los IDs: {video_ids}")
-            continue
-
-        for item in stats_res.get('items', []):
-            try:
-                record = build_video_record(item, channel_context, execution_time=execution_time)
-                videos.append(record)
-                logger.info('Procesado video ID: %s', item.get('id'))
-            except Exception as exc:
-                logger.error(f"Error al procesar el video {item.get('id')}: {str(exc)}")
-                logger.error(traceback.format_exc())
+            if not video_id:
+                continue
+            if published_datetime and published_datetime < cutoff_datetime:
+                continue
+            if video_id in seen_video_ids:
                 continue
 
-        next_page_token = res.get('nextPageToken')
+            seen_video_ids.add(video_id)
+            video_ids.append(video_id)
+
+        next_page_token = response.get('nextPageToken')
         if not next_page_token:
-            logger.info('Se han procesado todos los videos para el canal %s.', channel_name)
             break
 
-        time.sleep(0.1)
-
-    if not videos:
-        logger.warning('No se encontraron videos para el canal %s en los últimos %s días.', channel_name, days)
-        return pd.DataFrame(columns=EXPORT_COLUMNS)
-
-    df = pd.DataFrame(videos)
-    df = prepare_dataframe_for_export(df)
-    logger.info('DataFrame creado con %s registros para el canal %s.', len(df), channel_name)
-    log_dataframe_sample(df, label=f'canal {channel_name}')
-    return df
+    if run_report is not None:
+        run_report['videos_discovered'] += len(video_ids)
+    return video_ids
 
 
 
-def get_channel_id_and_name_from_url(youtube: Any, channel_url: str) -> tuple[str | None, str | None]:
-    channel_id = None
-    channel_name = None
+def fetch_video_details_batch(youtube: Any, video_ids: list[str], run_report: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    if not video_ids:
+        return []
+    if run_report is not None:
+        increment_api_call(run_report, 'videos_list')
+    response = youtube.videos().list(
+        part='snippet,contentDetails,statistics,status',
+        id=','.join(video_ids),
+    ).execute()
+    return response.get('items') or []
+
+
+
+def get_channel_videos(
+    youtube: Any,
+    channel_id: str,
+    channel_name: str,
+    channel_url: str = '',
+    uploads_playlist_id: str = '',
+    days: int = DEFAULT_LOOKBACK_DAYS,
+    run_report: dict[str, Any] | None = None,
+) -> pd.DataFrame:
+    channel_context = fetch_channel_context(
+        youtube,
+        channel_id=channel_id,
+        channel_name=channel_name,
+        channel_url=channel_url,
+        run_report=run_report,
+    )
+    execution_time = utc_now()
+    result_df = pd.DataFrame(columns=EXPORT_COLUMNS)
+    result_df.attrs['channel_fetch_failed'] = False
 
     try:
-        if '/channel/' in channel_url:
-            channel_id = channel_url.split('/channel/')[1].split('/')[0]
-            res = youtube.channels().list(
-                part='id,snippet',
-                id=channel_id,
-            ).execute()
-            if res.get('items'):
-                channel_name = res['items'][0]['snippet']['title']
-            else:
-                logger.warning(f"No se encontró información para channel_id: {channel_id}")
-        elif '/user/' in channel_url:
-            username = channel_url.split('/user/')[1].split('/')[0]
-            res = youtube.channels().list(
-                part='id,snippet',
-                forUsername=username,
-            ).execute()
-            if res.get('items'):
-                channel_id = res['items'][0]['id']
-                channel_name = res['items'][0]['snippet']['title']
-            else:
-                logger.warning(f"No se encontró información para el usuario: {username}")
-        elif '@' in channel_url:
-            handle = channel_url.split('@')[1].split('/')[0]
-            res = youtube.channels().list(
-                part='id,snippet',
-                forUsername=handle,
-            ).execute()
-            if res.get('items'):
-                channel_id = res['items'][0]['id']
-                channel_name = res['items'][0]['snippet']['title']
-            else:
-                res = youtube.search().list(
-                    part='snippet',
-                    q=handle,
-                    type='channel',
-                    maxResults=1,
-                ).execute()
-                if res.get('items'):
-                    channel_id = res['items'][0]['snippet']['channelId']
-                    channel_name = res['items'][0]['snippet']['channelTitle']
-                else:
-                    logger.warning(f"No se encontró información para el handle: {handle}")
-        else:
-            logger.error(f"URL del canal no reconocida: {channel_url}")
-            return None, None
-
-        if channel_id and not channel_name:
-            res = youtube.channels().list(
-                part='snippet',
-                id=channel_id,
-            ).execute()
-            if res.get('items'):
-                channel_name = res['items'][0]['snippet']['title']
-            else:
-                logger.warning(f"No se encontró información para channel_id: {channel_id}")
+        recent_video_ids = list_recent_video_ids_from_uploads(
+            youtube,
+            uploads_playlist_id=uploads_playlist_id,
+            days=days,
+            run_report=run_report,
+        )
+        logger.info('Descubiertos %s videos recientes para %s desde uploads playlist.', len(recent_video_ids), channel_name)
     except Exception as exc:
-        logger.error(f"Error al obtener el ID y nombre del canal desde {channel_url}: {str(exc)}")
+        logger.error('Error al descubrir videos desde uploads playlist para %s: %s', channel_name, str(exc))
         logger.error(traceback.format_exc())
+        result_df.attrs['channel_fetch_failed'] = True
+        return result_df
 
-    if not channel_id or not channel_name:
-        logger.error(f"No se pudo obtener el ID o nombre del canal desde {channel_url}")
-        return None, None
+    if not recent_video_ids:
+        logger.info('No se encontraron videos recientes para el canal %s en los últimos %s días.', channel_name, days)
+        return result_df
 
-    return channel_id, channel_name
+    videos: list[dict[str, str]] = []
+    try:
+        for index in range(0, len(recent_video_ids), 50):
+            batch_video_ids = recent_video_ids[index:index + 50]
+            video_items = fetch_video_details_batch(youtube, batch_video_ids, run_report=run_report)
+            for item in video_items:
+                videos.append(build_video_record(item, channel_context, execution_time=execution_time))
+    except Exception as exc:
+        logger.error('Error al enriquecer videos para %s: %s', channel_name, str(exc))
+        logger.error(traceback.format_exc())
+        result_df.attrs['channel_fetch_failed'] = True
+        return result_df
+
+    if not videos:
+        logger.info('No se pudieron enriquecer videos para el canal %s.', channel_name)
+        return result_df
+
+    result_df = prepare_dataframe_for_export(pd.DataFrame(videos))
+    result_df.attrs['channel_fetch_failed'] = False
+    logger.info('DataFrame creado con %s registros para el canal %s.', len(result_df), channel_name)
+    log_dataframe_sample(result_df, label=f'canal {channel_name}')
+    return result_df
+
+
+
+def append_videos_history(spreadsheet: Any, df: pd.DataFrame) -> int:
+    history_df = prepare_dataframe_for_export(df)
+    if history_df.empty:
+        return 0
+
+    history_sheet = get_or_create_worksheet(spreadsheet, VIDEOS_HISTORY_SHEET)
+    try:
+        existing_records = history_sheet.get_all_records()
+    except Exception as exc:
+        logger.warning('No se pudo leer videos_history antes del append: %s', str(exc))
+        existing_records = []
+
+    existing_keys = {
+        f"{normalize_text(record.get('video_id'))}::{normalize_text(record.get('execution_date'))}"
+        for record in existing_records
+    }
+    history_df = history_df.copy()
+    history_df['_history_key'] = history_df['video_id'] + '::' + history_df['execution_date']
+    history_append_df = history_df[~history_df['_history_key'].isin(existing_keys)].drop(columns=['_history_key'])
+
+    if history_append_df.empty:
+        logger.info('No hay filas nuevas para append en videos_history.')
+        return 0
+
+    append_sheet_rows(history_sheet, history_append_df)
+    return len(history_append_df)
 
 
 
 def export_dataframe_to_sheet(sheet: Any, combined_df: pd.DataFrame) -> None:
-    export_df = prepare_dataframe_for_export(combined_df)
-    required_rows = len(export_df) + 1
-    required_cols = len(export_df.columns)
-    ensure_sheet_capacity(sheet, required_rows=required_rows, required_cols=required_cols)
-    sheet.clear()
-    sheet.update([export_df.columns.values.tolist()] + export_df.values.tolist())
-    logger.info('Datos actualizados en la hoja de cálculo "%s".', getattr(sheet, 'title', '<sin título>'))
+    write_replace_sheet(sheet, combined_df)
+
+
+
+def record_channel_failure(run_report: dict[str, Any], channel: dict[str, str], error_message: str) -> None:
+    run_report['channels_failed'] += 1
+    run_report.setdefault('channel_failures', []).append({
+        'channel_id': channel.get('channel_id', ''),
+        'channel_name': channel.get('channel_name', ''),
+        'normalized_url': channel.get('normalized_url', ''),
+        'error': normalize_text(error_message),
+    })
 
 
 
 def main() -> int:
+    started_at = utc_now_iso()
+    run_report = create_run_report(started_at)
+
+    def finalize(exit_code: int) -> int:
+        run_report['finished_at'] = utc_now_iso()
+        write_operational_artifacts(run_report)
+        return exit_code
+
+    try:
+        days = parse_positive_int_env('DAYS', DEFAULT_LOOKBACK_DAYS)
+        channel_limit = parse_optional_positive_int_env('CHANNEL_LIMIT')
+        channel_filter = os.environ.get('CHANNEL_FILTER', '').strip()
+        force_refresh_registry = parse_bool_env('FORCE_REFRESH_REGISTRY', default=False)
+        write_history = parse_bool_env('WRITE_HISTORY', default=False)
+    except ValueError as exc:
+        logger.error(str(exc))
+        return finalize(1)
+
+    run_report['days_window'] = days
+    run_report['channel_limit_applied'] = '' if channel_limit is None else str(channel_limit)
+    run_report['channel_filter_applied'] = channel_filter
+    run_report['write_history_enabled'] = 'true' if write_history else 'false'
+
     api_key = os.environ.get('YOUTUBE_API_KEY')
     if not api_key:
         logger.error("La clave de API no está configurada en la variable de entorno 'YOUTUBE_API_KEY'")
-        return 1
+        return finalize(1)
 
     google_creds_json = os.environ.get('GOOGLE_SHEETS_CREDS_BASE64')
     if not google_creds_json:
         logger.error("Las credenciales de Google Sheets no están configuradas en 'GOOGLE_SHEETS_CREDS_BASE64'")
-        return 1
+        return finalize(1)
 
     try:
         decoded_creds = base64.b64decode(google_creds_json)
@@ -545,90 +995,106 @@ def main() -> int:
         )
         gc = gspread.authorize(credentials)
     except Exception as exc:
-        logger.error(f"Error al cargar las credenciales de Google Sheets: {str(exc)}")
+        logger.error(f'Error al cargar las credenciales de Google Sheets: {str(exc)}')
         logger.error(traceback.format_exc())
-        return 1
+        return finalize(1)
 
     spreadsheet_id = os.environ.get('SPREADSHEET_ID')
     if not spreadsheet_id:
         logger.error("El ID de la hoja de cálculo no está configurado en 'SPREADSHEET_ID'")
-        return 1
+        return finalize(1)
 
     try:
         spreadsheet = gc.open_by_key(spreadsheet_id)
-        sheet = spreadsheet.sheet1
+        current_sheet = get_or_create_worksheet(spreadsheet, VIDEOS_CURRENT_SHEET)
+        get_or_create_worksheet(spreadsheet, CHANNEL_REGISTRY_SHEET)
+        if write_history:
+            get_or_create_worksheet(spreadsheet, VIDEOS_HISTORY_SHEET)
         logger.info(
-            'Destino Google Sheets identificado. Documento: "%s" | Hoja: "%s".',
+            'Destino Google Sheets identificado. Documento: "%s" | Hoja snapshot actual: "%s".',
             spreadsheet.title,
-            sheet.title,
+            current_sheet.title,
         )
     except Exception as exc:
-        logger.error(f"Error al abrir la hoja de cálculo: {str(exc)}")
+        logger.error(f'Error al abrir la hoja de cálculo: {str(exc)}')
         logger.error(traceback.format_exc())
-        return 1
+        return finalize(1)
 
     youtube = build('youtube', 'v3', developerKey=api_key)
 
-    try:
-        existing_data = pd.DataFrame(sheet.get_all_records())
-        existing_data = prepare_dataframe_for_export(existing_data) if not existing_data.empty else pd.DataFrame(columns=EXPORT_COLUMNS)
-        logger.info('Datos existentes cargados desde "%s", %s registros encontrados.', sheet.title, len(existing_data))
-    except Exception as exc:
-        logger.warning(f"No se pudo leer datos existentes o la hoja está vacía: {str(exc)}")
-        existing_data = pd.DataFrame(columns=EXPORT_COLUMNS)
-
     channel_urls = get_urls()
     if not channel_urls:
-        logger.info('No hay canales para procesar el bloque semanal actual. Terminando ejecución.')
-        return 0
+        logger.info('No hay canales configurados en CHANNEL_URLS. Terminando ejecución.')
+        return finalize(0)
+
+    registry_df = sync_channel_registry_from_urls(
+        youtube,
+        spreadsheet,
+        channel_urls,
+        run_report=run_report,
+        force_refresh=force_refresh_registry,
+    )
+    if not registry_df.empty:
+        run_report['registry_rows_total'] = len(registry_df)
+        run_report['registry_rows_active'] = int((registry_df['active'].map(normalize_bool_text) == 'true').sum())
+        run_report['registry_rows_failed'] = int((registry_df['resolution_status'] != 'resolved').sum())
+        unresolved_registry = registry_df[registry_df['resolution_status'] != 'resolved']
+        run_report['unresolved_urls'] = unresolved_registry['normalized_url'].tolist() if not unresolved_registry.empty else []
+
+    active_channels_df = get_active_resolved_channels(registry_df)
+    active_channels_df = filter_channels_dataframe(active_channels_df, channel_filter=channel_filter, channel_limit=channel_limit)
+    run_report['channels_total'] = len(active_channels_df)
 
     all_videos_df = pd.DataFrame(columns=EXPORT_COLUMNS)
 
-    for url in channel_urls:
-        channel_id, channel_name = get_channel_id_and_name_from_url(youtube, url)
-        if channel_id and channel_name:
-            df = get_channel_videos(api_key, channel_id, channel_name, channel_url=url, days=60)
-            if not df.empty:
-                all_videos_df = pd.concat([all_videos_df, df], ignore_index=True)
-                logger.info('Datos agregados para el canal: %s', channel_name)
-            else:
-                logger.warning('No se encontraron videos para el canal: %s', channel_name)
+    for channel in active_channels_df.to_dict(orient='records'):
+        channel_df = get_channel_videos(
+            youtube,
+            channel_id=channel['channel_id'],
+            channel_name=channel['channel_name'],
+            channel_url=channel['normalized_url'],
+            uploads_playlist_id=channel['uploads_playlist_id'],
+            days=days,
+            run_report=run_report,
+        )
+        if channel_df.attrs.get('channel_fetch_failed'):
+            record_channel_failure(run_report, channel, 'Falló la extracción o enriquecimiento de videos.')
+            continue
+
+        run_report['channels_processed'] += 1
+        if not channel_df.empty:
+            all_videos_df = pd.concat([all_videos_df, channel_df], ignore_index=True)
+            logger.info('Datos agregados para el canal: %s', channel['channel_name'])
         else:
-            logger.error('No se pudo obtener el ID o nombre del canal para %s', url)
+            logger.info('Canal %s procesado sin videos en la ventana actual.', channel['channel_name'])
 
-    if all_videos_df.empty:
-        logger.error('No se encontraron videos para ninguno de los canales proporcionados en el bloque semanal actual.')
-        return 1
-
-    if not existing_data.empty:
-        combined_df = pd.concat([existing_data, all_videos_df], ignore_index=True)
-        combined_df.drop_duplicates(subset=['video_id', 'channel_id'], inplace=True)
-    else:
-        combined_df = all_videos_df
-
-    combined_df = prepare_dataframe_for_export(combined_df)
+    current_snapshot_df = prepare_dataframe_for_export(all_videos_df)
+    run_report['rows_current_snapshot'] = len(current_snapshot_df)
+    run_report['videos_exported'] = len(current_snapshot_df)
 
     try:
         logger.info(
-            'Canales procesados. %s canales totales con %s registros.',
-            len(combined_df['channel_name'].replace('', pd.NA).dropna().unique()),
-            len(combined_df),
+            'Canales procesados. %s canales totales con %s registros en el snapshot actual.',
+            len(current_snapshot_df['channel_name'].replace('', pd.NA).dropna().unique()) if not current_snapshot_df.empty else 0,
+            len(current_snapshot_df),
         )
-        logger.info('Filtrado de datos completado. %s registros listos para exportar.', len(combined_df))
-        log_dataframe_sample(combined_df, label='exportación final')
+        logger.info('Snapshot actual preparado. %s registros listos para exportar.', len(current_snapshot_df))
+        log_dataframe_sample(current_snapshot_df, label='exportación final')
     except Exception as exc:
-        logger.error(f"Error al preparar el DataFrame final: {str(exc)}")
+        logger.error(f'Error al preparar el DataFrame final: {str(exc)}')
         logger.error(traceback.format_exc())
-        return 1
+        return finalize(1)
 
     try:
-        export_dataframe_to_sheet(sheet, combined_df)
+        write_replace_sheet(current_sheet, current_snapshot_df)
+        if write_history:
+            run_report['history_rows_appended'] = append_videos_history(spreadsheet, current_snapshot_df)
     except Exception as exc:
-        logger.error(f"Error al actualizar la hoja de cálculo: {str(exc)}")
+        logger.error(f'Error al actualizar la hoja de cálculo: {str(exc)}')
         logger.error(traceback.format_exc())
-        return 1
+        return finalize(1)
 
-    return 0
+    return finalize(0)
 
 
 if __name__ == '__main__':

@@ -1,10 +1,6 @@
-# get_urls.py
 from __future__ import annotations
 
-import datetime as dt
-import math
-import os
-from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 CHANNEL_URLS = [
     "https://www.youtube.com/@MarianoTrejo",
@@ -184,93 +180,46 @@ CHANNEL_URLS = [
     "https://www.youtube.com/@BobbyBroccoli"
 ]
 
-DEFAULT_CHUNK_SIZE = 40
+CHANNEL_SECTION_SUFFIXES = (
+    '/videos',
+    '/featured',
+    '/shorts',
+    '/streams',
+    '/playlists',
+    '/community',
+    '/about',
+)
 
 
-def _resolve_reference_date() -> dt.date:
-    """
-    Devuelve la fecha de referencia usada para calcular el bloque semanal.
+def normalize_channel_url(url: str) -> str:
+    normalized_url = url.strip()
+    if not normalized_url:
+        return ''
 
-    - Si existe REFERENCE_DATE en formato YYYY-MM-DD, se usa esa fecha.
-    - Si no existe, se usa la fecha actual en UTC.
-    """
-    reference_date = os.environ.get("REFERENCE_DATE", "").strip()
+    parts = urlsplit(normalized_url)
+    netloc = parts.netloc.replace('m.youtube.com', 'www.youtube.com')
+    path = parts.path.rstrip('/')
 
-    if not reference_date:
-        return dt.datetime.now(dt.UTC).date()
+    for suffix in CHANNEL_SECTION_SUFFIXES:
+        if path.endswith(suffix):
+            path = path[:-len(suffix)]
+            break
 
-    try:
-        return dt.date.fromisoformat(reference_date)
-    except ValueError as exc:
-        raise ValueError(
-            "REFERENCE_DATE debe tener el formato YYYY-MM-DD. "
-            f"Valor recibido: {reference_date!r}"
-        ) from exc
+    path = path.rstrip('/')
 
+    return urlunsplit((parts.scheme, netloc, path, '', ''))
 
-def _resolve_chunk_index(total_chunks: int, iso_week: int) -> int:
-    """
-    Calcula qué bloque toca procesar.
-
-    - Si FORCE_CHUNK_INDEX está informado, lo usa para forzar un bloque concreto.
-    - Si no, rota automáticamente usando la semana ISO actual.
-    """
-    forced_chunk = os.environ.get("FORCE_CHUNK_INDEX", "").strip()
-
-    if forced_chunk:
-        try:
-            chunk_index = int(forced_chunk)
-        except ValueError as exc:
-            raise ValueError(
-                "FORCE_CHUNK_INDEX debe ser un entero entre 0 y "
-                f"{total_chunks - 1}. Valor recibido: {forced_chunk!r}"
-            ) from exc
-
-        if not 0 <= chunk_index < total_chunks:
-            raise ValueError(
-                "FORCE_CHUNK_INDEX está fuera de rango. Debe estar entre 0 y "
-                f"{total_chunks - 1}. Valor recibido: {chunk_index}"
-            )
-
-        return chunk_index
-
-    return (iso_week - 1) % total_chunks
-
-
-def get_weekly_chunk_info(chunk_size: int = DEFAULT_CHUNK_SIZE) -> dict[str, Any]:
-    """
-    Devuelve la información del bloque semanal a procesar.
-
-    La rotación es automática por semana ISO, de modo que una ejecución semanal
-    avance por los canales sin necesidad de editar el repositorio manualmente.
-    """
-    if chunk_size <= 0:
-        raise ValueError("chunk_size debe ser mayor que 0")
-
-    reference_date = _resolve_reference_date()
-    iso_week = reference_date.isocalendar().week
-    total_channels = len(CHANNEL_URLS)
-    total_chunks = max(1, math.ceil(total_channels / chunk_size))
-    chunk_index = _resolve_chunk_index(total_chunks, iso_week)
-
-    start = chunk_index * chunk_size
-    end = min(start + chunk_size, total_channels)
-    channel_urls = CHANNEL_URLS[start:end]
-
-    return {
-        "reference_date": reference_date.isoformat(),
-        "iso_week": iso_week,
-        "chunk_index": chunk_index,
-        "chunk_number": chunk_index + 1,
-        "total_chunks": total_chunks,
-        "chunk_size": chunk_size,
-        "total_channels": total_channels,
-        "start_index": start,
-        "end_index": end,
-        "channel_urls": channel_urls,
-    }
 
 
 def get_urls() -> list[str]:
-    """Retorna únicamente las URLs del bloque semanal que toca ejecutar."""
-    return get_weekly_chunk_info()["channel_urls"]
+    seen: set[str] = set()
+    normalized_urls: list[str] = []
+
+    for url in CHANNEL_URLS:
+        normalized_url = normalize_channel_url(url)
+        if not normalized_url or normalized_url in seen:
+            continue
+        seen.add(normalized_url)
+        normalized_urls.append(normalized_url)
+
+    return normalized_urls
