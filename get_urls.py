@@ -4,6 +4,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 CHANNEL_URLS = [
     "https://www.youtube.com/@MarianoTrejo",
+    "https://www.youtube.com/@la_inteligencia_artificial",
     "https://www.youtube.com/@humphrey",
     "https://www.youtube.com/@MisPropiasFinanzas",
     "https://www.youtube.com/@AdriàSolàPastor",
